@@ -1,0 +1,82 @@
+{
+	"subagents": {
+		"agentOverrides": {
+			"oracle": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"worker": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"researcher": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"reviewer": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"scout": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"sdd-onboard": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"sdd-init": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"sdd-explore": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"sdd-proposal": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"sdd-spec": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"sdd-design": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"sdd-tasks": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"sdd-apply": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"sdd-verify": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"sdd-sync": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"sdd-archive": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"context-builder": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"delegate": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			},
+			"planner": {
+				"model": "kimi-coding/kimi-for-coding",
+				"thinking": "high"
+			}
+		}
+	}
+}

@@ -1,0 +1,54 @@
+strict_tdd: true
+context: |
+  termux-x11 is a Java/Gradle project.
+  Detected markers: build.gradle, GitHub Actions.
+  Additional evidence: Java/Gradle manifest detected via build.gradle.
+  Primary test command: ./gradlew test.
+  Unit tests: Gradle test (./gradlew test).
+  Integration tests: none.
+  E2E tests: none.
+rules:
+  proposal:
+    require_problem_statement: true
+  spec:
+    require_acceptance_criteria: true
+  design:
+    require_tradeoffs: true
+  tasks:
+    protect_review_workload: true
+  apply:
+    test_command: "./gradlew test"
+  verify:
+    test_command: "./gradlew test"
+testing:
+  detected: "2026-05-20"
+  runner:
+    command: "./gradlew test"
+    framework: "Gradle test"
+  layers:
+    unit: "Gradle test"
+    integration: ""
+    e2e: ""
+  commands:
+    unit:
+      - scope: "."
+        command: "./gradlew test"
+        framework: "Gradle test"
+    integration:
+      []
+    e2e:
+      []
+  coverage:
+    command: ""
+    commands:
+      []
+quality:
+  lint: ""
+  lint_commands:
+    []
+  typecheck: ""
+  typecheck_commands:
+    []
+  format: ""
+  format_commands:
+    []

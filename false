@@ -1,0 +1,57 @@
+## Review: Engram Recovery on Termux — Audit Complete
+
+### Correct (Verified Evidence)
+
+- **Binary provenance and version**: `~/.pi/agent/bin/engram --version` returns `engram 1.15.13` (confirmed).
+- **Android-native build**: `strings` on the binary contains `build	GOOS=android` and `android_get_device_api_level`, confirming this is a locally compiled android/arm64 binary, not the GitHub `linux_arm64` prebuilt that crashed with SIGSYS/faccessat2.
+- **Server uptime and health**: `engram serve` is running as pid `2030`, listening on `127.0.0.1:7437`. The HTTP health endpoint returns `{"service":"engram","status":"ok","version":"0.1.0"}`.
+- **Database health**: `engram doctor` reports 4/4 checks ok, 0 warnings, 0 errors, 0 blocked. Projects: `termux-x11` with 1 observation, 3 sessions, 1 prompt.
+- **Pi package config**: `~/.pi/agent/settings.json` lists `npm:gentle-engram@0.1.7` and the installed package at `~/.pi/agent/npm/node_modules/gentle-engram/package.json` confirms version `0.1.7`.
+- **MCP config**: `~/.pi/agent/mcp.json` has `engram` entry with `directTools: false` and `lifecycle: lazy`.
+- **No orphaned crash artifacts**: No old `engram` binaries found in `/usr/bin`, `/usr/local/bin`, `~/.local/bin`, or `~/go/bin`. No crash dumps or `.bak`/`.old` files in `~/.engram/`.
+- **MCP stdio server is functional**: Manual JSON-RPC test (`initialize` + `tools/list`) against `engram mcp --tools=agent` returned correct MCP responses and the full tool catalog. The server exits cleanly on stdin EOF, which is expected stdio behavior.
+- **Context and search verified**: `engram context termux-x11` and `engram stats` return expected data. The prior recovery observation is visible in context.
+
+### Fixed (N/A — audit-only, no edits applied)
+
+No edits were made per instructions.
+
+### Blockers (Critical — must resolve before proceeding)
+
+**None.** The recovery is functionally complete.
+
+### Notes (Observations, Risks, Follow-ups)
+
+1. **Benign MCP gateway connection quirk (`mcp({connect:'engram'})`)**
+   - **Location**: `pi-mcp-adapter` (v2.6.1) gateway path, not the Engram binary.
+   - **Evidence**: The underlying `engram mcp --tools=agent` stdio server responds correctly to manual JSON-RPC. The "connection closed" symptom when calling `mcp({connect:'engram'})` is an adapter-side lifecycle issue (likely idle/close timing or stdio transport negotiation in `pi-mcp-adapter/server-manager.ts`).
+   - **Impact**: Low. Pi-native `mem_*` tools (`mem_save`, `mem_search`, `mem_context`, `mem_stats`, `mem_doctor`) are working. The MCP gateway path is optional.
+   - **Next step**: If you want to debug the gateway path, set `"debug": true` in the `engram` stanza of `~/.pi/agent/mcp.json` to surface stderr, then retry `mcp({connect:'engram'})` and inspect the adapter logs.
+
+2. **Stale npx cache artifact**
+   - **Location**: `~/.npm/_npx/614236e1eb7f32b4/node_modules/gentle-engram/` is version `0.1.4`.
+   - **Evidence**: The active Pi agent loads from `~/.pi/agent/npm/node_modules/gentle-engram/` (version `0.1.7`). The `0.1.4` copy is only an old npx cache entry.
+   - **Impact**: Negligible. Safe to leave; Pi does not resolve packages from the npx cache unless explicitly invoked via `npx`.
+   - **Next step**: Optional cleanup — `rm -rf ~/.npm/_npx/614236e1eb7f32b4`.
+
+3. **No auto-restart for `engram serve`**
+   - **Evidence**: The server is running as a plain background process with a pid file. No systemd, termux-services, or cron restart mechanism is in place.
+   - **Impact**: Medium-low. If Termux kills background processes or the device restarts, Engram will be offline until manually restarted.
+   - **Next step**: Consider adding a Termux wake-lock or a simple shell wrapper that restarts `engram serve` if the port is not listening. This is optional unless you experience frequent Termux background kills.
+
+4. **sqlite3 CLI unavailable**
+   - **Evidence**: `sqlite3` command not found. `engram doctor` covers operational integrity, but a low-level `PRAGMA integrity_check` could not be run independently.
+   - **Impact**: Low. The Engram-native doctor passes all checks.
+   - **Next step**: Optional — `pkg install sqlite` if you want an independent verification path.
+
+5. **WAL file size is moderate**
+   - **Evidence**: `~/.engram/engram.db-wal` is ~218 KB and `.db-shm` is ~32 KB. This is normal for a recently active database.
+   - **Impact**: None currently.
+   - **Next step**: If WAL grows unexpectedly large over time, a manual `engram` checkpoint or restart will compact it.
+
+### Exact Next Step
+
+No action required. The recovery is complete and safe for normal use. If you want to chase the optional `mcp({connect:'engram'})` gateway path, the next step is to add `"debug": true` to the `engram` server definition in `~/.pi/agent/mcp.json` and retry.
+
+---
+*Audit saved to Engram as observation #2 (project: termux-x11).*

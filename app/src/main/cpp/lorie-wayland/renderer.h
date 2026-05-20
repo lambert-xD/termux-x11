@@ -1,0 +1,27 @@
+#ifndef LORIE_RENDERER_H
+#define LORIE_RENDERER_H
+
+#include <android/native_window.h>
+#include <stdatomic.h>
+#include <stdbool.h>
+#include <stdint.h>
+
+struct lorie_surface;
+
+struct lorie_renderer;
+
+struct lorie_renderer *lorie_renderer_create(void);
+void lorie_renderer_destroy(struct lorie_renderer *r);
+int lorie_renderer_init(struct lorie_renderer *r);
+void lorie_renderer_fini(struct lorie_renderer *r);
+
+void lorie_renderer_set_window(struct lorie_renderer *r, ANativeWindow *window);
+void lorie_renderer_add_surface(struct lorie_renderer *r, struct lorie_surface *s);
+void lorie_renderer_remove_surface(struct lorie_renderer *r, struct lorie_surface *s);
+void lorie_renderer_damage_surface(struct lorie_renderer *r, struct lorie_surface *s,
+                                    int32_t x, int32_t y, int32_t w, int32_t h);
+int lorie_renderer_commit(struct lorie_renderer *r);
+
+extern atomic_int lorie_renderer_filtering;
+
+#endif

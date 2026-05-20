@@ -1,0 +1,311 @@
+/* Lorie Wayland Compositor — Surface, Region, Subcompositor */
+
+#include "compositor.h"
+#include "../../lorie/buffer.h"
+#include <wayland-server-protocol.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Forward declaration needed for surface_impl table */
+static void surface_handle_resource_destroy(struct wl_resource *resource);
+
+/* --- Surface callbacks --- */
+
+static void surface_destroy(struct wl_client *client, struct wl_resource *resource) {
+    wl_resource_destroy(resource);
+    (void)client;
+}
+
+static void surface_attach(struct wl_client *client,
+                           struct wl_resource *resource,
+                           struct wl_resource *buffer,
+                           int32_t x, int32_t y) {
+    struct lorie_surface *s = wl_resource_get_user_data(resource);
+    s->pending_buffer = buffer;
+    s->pending_attached = 1;
+    s->pending_x = x;
+    s->pending_y = y;
+    (void)client;
+}
+
+static void surface_damage(struct wl_client *client,
+                           struct wl_resource *resource,
+                           int32_t x, int32_t y,
+                           int32_t width, int32_t height) {
+    struct lorie_surface *s = wl_resource_get_user_data(resource);
+    pixman_region32_union_rect(&s->damage, &s->damage, x, y, width, height);
+    (void)client;
+}
+
+static void surface_frame(struct wl_client *client,
+                          struct wl_resource *resource,
+                          uint32_t callback) {
+    struct lorie_surface *s = wl_resource_get_user_data(resource);
+    struct lorie_frame_callback *cb = calloc(1, sizeof(*cb));
+    if (!cb) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    cb->resource = wl_resource_create(client, &wl_callback_interface, 1, callback);
+    if (!cb->resource) {
+        free(cb);
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_list_insert(&s->frame_callbacks, &cb->link);
+}
+
+static void surface_set_opaque_region(struct wl_client *client,
+                                      struct wl_resource *resource,
+                                      struct wl_resource *region) {
+    (void)client; (void)resource; (void)region;
+}
+
+static void surface_set_input_region(struct wl_client *client,
+                                     struct wl_resource *resource,
+                                     struct wl_resource *region) {
+    (void)client; (void)resource; (void)region;
+}
+
+static void surface_commit(struct wl_client *client,
+                           struct wl_resource *resource) {
+    struct lorie_surface *s = wl_resource_get_user_data(resource);
+    if (s->pending_attached) {
+        if (s->buffer_resource) {
+            wl_buffer_send_release(s->buffer_resource);
+            if (s->buffer) {
+                LorieBuffer_release((LorieBuffer*)s->buffer);
+                s->buffer = NULL;
+            }
+        }
+        s->buffer_resource = s->pending_buffer;
+        s->pending_buffer = NULL;
+        s->pending_attached = 0;
+
+        if (s->buffer_resource) {
+            struct wl_shm_buffer *shm = wl_shm_buffer_get(s->buffer_resource);
+            if (shm) {
+                int32_t w = wl_shm_buffer_get_width(shm);
+                int32_t h = wl_shm_buffer_get_height(shm);
+                int32_t stride = wl_shm_buffer_get_stride(shm);
+                uint32_t fmt = wl_shm_buffer_get_format(shm);
+                int8_t lfmt = (fmt == WL_SHM_FORMAT_ARGB8888)
+                    ? AHARDWAREBUFFER_FORMAT_B8G8R8A8_UNORM
+                    : AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM;
+                LorieBuffer *lb = LorieBuffer_allocate(w, h, lfmt, LORIEBUFFER_REGULAR);
+                if (lb) {
+                    const LorieBuffer_Desc *desc = LorieBuffer_description(lb);
+                    uint8_t *dst = (uint8_t*)desc->data;
+                    uint8_t *src = (uint8_t*)wl_shm_buffer_get_data(shm);
+                    int dst_stride = w * 4;
+                    for (int row = 0; row < h; row++) {
+                        memcpy(dst + row * dst_stride, src + row * stride, w * 4);
+                    }
+                    s->buffer = lb;
+                    s->width = w;
+                    s->height = h;
+                }
+            }
+        }
+    }
+    struct lorie_frame_callback *cb, *tmp;
+    wl_list_for_each_safe(cb, tmp, &s->frame_callbacks, link) {
+        wl_callback_send_done(cb->resource, 0);
+        wl_resource_destroy(cb->resource);
+    }
+    wl_list_init(&s->frame_callbacks);
+    (void)client;
+}
+
+static void surface_set_buffer_transform(struct wl_client *client,
+                                         struct wl_resource *resource,
+                                         int32_t transform) {
+    struct lorie_surface *s = wl_resource_get_user_data(resource);
+    s->buffer_transform = transform;
+    (void)client;
+}
+
+static void surface_set_buffer_scale(struct wl_client *client,
+                                     struct wl_resource *resource,
+                                     int32_t scale) {
+    struct lorie_surface *s = wl_resource_get_user_data(resource);
+    s->buffer_scale = scale;
+    (void)client;
+}
+
+static void surface_damage_buffer(struct wl_client *client,
+                                  struct wl_resource *resource,
+                                  int32_t x, int32_t y,
+                                  int32_t width, int32_t height) {
+    surface_damage(client, resource, x, y, width, height);
+}
+
+static const struct wl_surface_interface surface_impl = {
+    surface_destroy,
+    surface_attach,
+    surface_damage,
+    surface_frame,
+    surface_set_opaque_region,
+    surface_set_input_region,
+    surface_commit,
+    surface_set_buffer_transform,
+    surface_set_buffer_scale,
+    surface_damage_buffer,
+};
+
+static void surface_handle_resource_destroy(struct wl_resource *resource) {
+    struct lorie_surface *s = wl_resource_get_user_data(resource);
+    wl_list_remove(&s->link);
+    wl_list_remove(&s->subsurface_link);
+    struct lorie_surface *child, *child_tmp;
+    wl_list_for_each_safe(child, child_tmp, &s->subsurfaces, subsurface_link) {
+        child->parent = NULL;
+        wl_list_remove(&child->subsurface_link);
+        wl_list_init(&child->subsurface_link);
+    }
+    if (s->buffer_resource)
+        wl_buffer_send_release(s->buffer_resource);
+    if (s->buffer) {
+        LorieBuffer_release((LorieBuffer*)s->buffer);
+        s->buffer = NULL;
+    }
+    struct lorie_frame_callback *cb, *cb_tmp;
+    wl_list_for_each_safe(cb, cb_tmp, &s->frame_callbacks, link) {
+        wl_resource_destroy(cb->resource);
+    }
+    pixman_region32_fini(&s->damage);
+    free(s);
+}
+
+/* --- Internal API --- */
+
+struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,
+                                                     struct wl_client *client,
+                                                     uint32_t id) {
+    struct lorie_surface *s = calloc(1, sizeof(*s));
+    if (!s) return NULL;
+    s->compositor = c;
+    s->buffer = NULL;
+    s->buffer_scale = 1;
+    wl_list_init(&s->link);
+    wl_list_init(&s->frame_callbacks);
+    wl_list_init(&s->subsurfaces);
+    wl_list_init(&s->subsurface_link);
+    pixman_region32_init(&s->damage);
+    if (client) {
+        s->resource = wl_resource_create(client, &wl_surface_interface, 5, id);
+        if (!s->resource) {
+            pixman_region32_fini(&s->damage);
+            free(s);
+            return NULL;
+        }
+        wl_resource_set_implementation(s->resource, &surface_impl, s,
+                                       surface_handle_resource_destroy);
+    }
+    if (c)
+        wl_list_insert(&c->surfaces, &s->link);
+    return s;
+}
+
+void lorie_surface_destroy_internal(struct lorie_surface *s) {
+    if (!s) return;
+    if (s->resource)
+        wl_resource_destroy(s->resource);
+    else {
+        wl_list_remove(&s->link);
+        wl_list_remove(&s->subsurface_link);
+        pixman_region32_fini(&s->damage);
+        free(s);
+    }
+}
+
+/* --- Compositor callback wrappers --- */
+
+void compositor_create_surface(struct wl_client *client,
+                               struct wl_resource *resource,
+                               uint32_t id) {
+    struct lorie_compositor *c = wl_resource_get_user_data(resource);
+    struct lorie_surface *s = lorie_surface_create_internal(c, client, id);
+    if (!s)
+        wl_client_post_no_memory(client);
+}
+
+/* --- Region --- */
+
+static void region_destroy(struct wl_client *client, struct wl_resource *resource) {
+    wl_resource_destroy(resource);
+    (void)client;
+}
+
+static void region_add(struct wl_client *client, struct wl_resource *resource,
+                       int32_t x, int32_t y, int32_t w, int32_t h) {
+    struct lorie_region *r = wl_resource_get_user_data(resource);
+    pixman_region32_union_rect(&r->region, &r->region, x, y, w, h);
+    (void)client;
+}
+
+static void region_subtract(struct wl_client *client, struct wl_resource *resource,
+                            int32_t x, int32_t y, int32_t w, int32_t h) {
+    struct lorie_region *r = wl_resource_get_user_data(resource);
+    pixman_region32_t rect;
+    pixman_region32_init_rect(&rect, x, y, w, h);
+    pixman_region32_subtract(&r->region, &r->region, &rect);
+    pixman_region32_fini(&rect);
+    (void)client;
+}
+
+static const struct wl_region_interface region_impl = {
+    region_destroy,
+    region_add,
+    region_subtract,
+};
+
+static void region_handle_resource_destroy(struct wl_resource *resource) {
+    struct lorie_region *r = wl_resource_get_user_data(resource);
+    pixman_region32_fini(&r->region);
+    free(r);
+}
+
+void compositor_create_region(struct wl_client *client,
+                              struct wl_resource *resource,
+                              uint32_t id) {
+    struct lorie_region *r = calloc(1, sizeof(*r));
+    if (!r) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    pixman_region32_init(&r->region);
+    r->resource = wl_resource_create(client, &wl_region_interface, 1, id);
+    if (!r->resource) {
+        pixman_region32_fini(&r->region);
+        free(r);
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(r->resource, &region_impl, r,
+                                   region_handle_resource_destroy);
+}
+
+/* --- Subcompositor --- */
+
+void subcompositor_get_subsurface(struct wl_client *client,
+                                  struct wl_resource *resource,
+                                  uint32_t id,
+                                  struct wl_resource *surface_resource,
+                                  struct wl_resource *parent_resource) {
+    struct lorie_surface *surface = wl_resource_get_user_data(surface_resource);
+    struct lorie_surface *parent = wl_resource_get_user_data(parent_resource);
+    if (surface == parent) {
+        wl_resource_post_error(resource,
+            WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+            "cannot subsurface a surface to itself");
+        return;
+    }
+    if (surface->parent) {
+        wl_list_remove(&surface->subsurface_link);
+        surface->parent = NULL;
+    }
+    surface->parent = parent;
+    wl_list_insert(&parent->subsurfaces, &surface->subsurface_link);
+    (void)client; (void)resource; (void)id;
+}

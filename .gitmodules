@@ -61,3 +61,31 @@
 [submodule "app/src/main/cpp/bzip2"]
 	path = app/src/main/cpp/bzip2
 	url = https://gitlab.com/bzip2/bzip2.git
+[submodule "wayland/wev"]
+	path = wayland/wev
+	url = https://gitlab.freedesktop.org/wayland/wev.git
+	ignore = dirty
+[submodule "wayland/ci-templates"]
+	path = wayland/ci-templates
+	url = https://gitlab.freedesktop.org/wayland/ci-templates.git
+	ignore = dirty
+[submodule "wayland/wayland"]
+	path = wayland/wayland
+	url = https://gitlab.freedesktop.org/wayland/wayland.git
+	ignore = dirty
+[submodule "wayland/wayland-protocols"]
+	path = wayland/wayland-protocols
+	url = https://gitlab.freedesktop.org/wayland/wayland-protocols.git
+	ignore = dirty
+[submodule "wayland/wayland-utils"]
+	path = wayland/wayland-utils
+	url = https://gitlab.freedesktop.org/wayland/wayland-utils.git
+	ignore = dirty
+[submodule "wayland/wayland.freedesktop.org"]
+	path = wayland/wayland.freedesktop.org
+	url = https://gitlab.freedesktop.org/wayland/wayland.freedesktop.org.git
+	ignore = dirty
+[submodule "wayland/weston"]
+	path = wayland/weston
+	url = https://gitlab.freedesktop.org/wayland/weston.git
+	ignore = dirty

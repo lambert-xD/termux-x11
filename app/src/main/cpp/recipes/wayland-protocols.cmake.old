@@ -1,0 +1,113 @@
+# Wayland protocols CMake recipe for Android NDK
+# Generates protocol headers from XML definitions
+
+set(WAYLAND_PROTOCOLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/wayland/wayland-protocols")
+set(WAYLAND_PROTOCOL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/wayland/wayland/protocol")
+
+# Find or define wayland-scanner executable
+if(CMAKE_CROSSCOMPILING)
+    # For cross-compilation (Android), wayland-scanner must be a host tool
+    # Typically you'd have it pre-installed or built separately
+    find_program(WAYLAND_SCANNER wayland-scanner)
+    if(NOT WAYLAND_SCANNER)
+        message(FATAL_ERROR "wayland-scanner not found. Please install wayland-scanner on your host system or build it separately.")
+    endif()
+else()
+    set(WAYLAND_SCANNER wayland-scanner)
+endif()
+
+# Core wayland protocol (always needed)
+set(WAYLAND_CORE_PROTOCOL "${WAYLAND_PROTOCOL_DIR}/wayland.xml")
+
+# Function to generate protocol headers from XML
+function(wayland_protocol_generate PROTOCOL_XML OUT_PREFIX)
+    get_filename_component(PROTOCOL_NAME "${PROTOCOL_XML}" NAME_WE)
+    set(OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols")
+    file(MAKE_DIRECTORY "${OUTPUT_DIR}")
+
+    set(HEADER "${OUTPUT_DIR}/${OUT_PREFIX}.h")
+    set(CODE "${OUTPUT_DIR}/${OUT_PREFIX}.c")
+    set(PRIVATE_CODE "${OUTPUT_DIR}/${OUT_PREFIX}-private.c")
+
+    # Generate server header
+    add_custom_command(
+        OUTPUT "${HEADER}"
+        COMMAND ${WAYLAND_SCANNER} server-header ${PROTOCOL_XML} ${HEADER}
+        DEPENDS ${PROTOCOL_XML} ${WAYLAND_SCANNER}
+        COMMENT "Generating Wayland server header for ${PROTOCOL_NAME}"
+        VERBATIM)
+
+    # Generate server code (private)
+    add_custom_command(
+        OUTPUT "${PRIVATE_CODE}"
+        COMMAND ${WAYLAND_SCANNER} private-code ${PROTOCOL_XML} ${PRIVATE_CODE}
+        DEPENDS ${PROTOCOL_XML} ${WAYLAND_SCANNER}
+        COMMENT "Generating Wayland server code for ${PROTOCOL_NAME}"
+        VERBATIM)
+
+    # Generate client header
+    set(CLIENT_HEADER "${OUTPUT_DIR}/${OUT_PREFIX}-client.h")
+    add_custom_command(
+        OUTPUT "${CLIENT_HEADER}"
+        COMMAND ${WAYLAND_SCANNER} client-header ${PROTOCOL_XML} ${CLIENT_HEADER}
+        DEPENDS ${PROTOCOL_XML} ${WAYLAND_SCANNER}
+        COMMENT "Generating Wayland client header for ${PROTOCOL_NAME}"
+        VERBATIM)
+
+    set(WAYLAND_PROTOCOL_HEADERS ${WAYLAND_PROTOCOL_HEADERS} ${HEADER} PARENT_SCOPE)
+    set(WAYLAND_PROTOCOL_SOURCES ${WAYLAND_PROTOCOL_SOURCES} ${PRIVATE_CODE} PARENT_SCOPE)
+    set(WAYLAND_PROTOCOL_CLIENT_HEADERS ${WAYLAND_PROTOCOL_CLIENT_HEADERS} ${CLIENT_HEADER} PARENT_SCOPE)
+endfunction()
+
+# Core wayland protocol
+check_type_size("uint32_t" SIZEOF_UINT32_T)
+wayland_protocol_generate(${WAYLAND_CORE_PROTOCOL} "wayland-protocol")
+
+# Standard stable protocols
+set(STABLE_PROTOCOLS
+    "${WAYLAND_PROTOCOLS_DIR}/stable/xdg-shell/xdg-shell.xml"
+    "${WAYLAND_PROTOCOLS_DIR}/stable/viewporter/viewporter.xml"
+    "${WAYLAND_PROTOCOLS_DIR}/stable/presentation-time/presentation-time.xml"
+    "${WAYLAND_PROTOCOLS_DIR}/stable/tablet/tablet-v2.xml"
+    "${WAYLAND_PROTOCOLS_DIR}/stable/linux-dmabuf/linux-dmabuf-v1.xml")
+
+foreach(PROTOCOL ${STABLE_PROTOCOLS})
+    if(EXISTS ${PROTOCOL})
+        get_filename_component(PROTOCOL_DIR ${PROTOCOL} DIRECTORY)
+        get_filename_component(PROTOCOL_DIR_NAME ${PROTOCOL_DIR} NAME)
+        get_filename_component(PROTOCOL_NAME ${PROTOCOL} NAME_WE)
+        wayland_protocol_generate(${PROTOCOL} "${PROTOCOL_DIR_NAME}-${PROTOCOL_NAME}")
+    endif()
+endforeach()
+
+# Unstable protocols (commonly used)
+set(UNSTABLE_PROTOCOLS
+    "${WAYLAND_PROTOCOLS_DIR}/unstable/xdg-decoration/xdg-decoration-unstable-v1.xml"
+    "${WAYLAND_PROTOCOLS_DIR}/unstable/idle-inhibit/idle-inhibit-unstable-v1.xml"
+    "${WAYLAND_PROTOCOLS_DIR}/unstable/pointer-constraints/pointer-constraints-unstable-v1.xml"
+    "${WAYLAND_PROTOCOLS_DIR}/unstable/pointer-gestures/pointer-gestures-unstable-v1.xml"
+    "${WAYLAND_PROTOCOLS_DIR}/unstable/relative-pointer/relative-pointer-unstable-v1.xml"
+    "${WAYLAND_PROTOCOLS_DIR}/unstable/keyboard-shortcuts-inhibit/keyboard-shortcuts-inhibit-unstable-v1.xml")
+
+foreach(PROTOCOL ${UNSTABLE_PROTOCOLS})
+    if(EXISTS ${PROTOCOL})
+        get_filename_component(PROTOCOL_DIR ${PROTOCOL} DIRECTORY)
+        get_filename_component(PROTOCOL_DIR_NAME ${PROTOCOL_DIR} NAME)
+        get_filename_component(PROTOCOL_NAME ${PROTOCOL} NAME_WE)
+        wayland_protocol_generate(${PROTOCOL} "${PROTOCOL_DIR_NAME}-${PROTOCOL_NAME}")
+    endif()
+endforeach()
+
+# Create interface library for protocol headers
+add_library(wayland-protocols INTERFACE)
+target_include_directories(wayland-protocols INTERFACE
+    "${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols"
+    "${WAYLAND_PROTOCOLS_DIR}/include")
+
+# Collect all generated sources into an object library for linking
+add_library(wayland-protocols-generated OBJECT ${WAYLAND_PROTOCOL_SOURCES})
+target_include_directories(wayland-protocols-generated PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols"
+    "${WAYLAND_SRC_DIR}"
+    "${CMAKE_CURRENT_BINARY_DIR}")
+target_link_libraries(wayland-protocols-generated PUBLIC wayland-server)

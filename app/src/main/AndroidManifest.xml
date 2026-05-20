@@ -36,6 +36,10 @@
             <meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />
         </activity>
         <activity
+            android:name=".WaylandActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden" />
+        <activity
             android:theme="@style/Theme.AppCompat.DayNight"
             android:excludeFromRecents="true"
             android:name=".LoriePreferences"
