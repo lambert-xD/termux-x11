@@ -16,11 +16,13 @@ Esta sesión reescribió el compositor Wayland de termux-x11 desde cero después
 ## Timeline de la Sesión
 
 ### Fase 1: Implementación original (descartada)
+
 - Se intentó escribir 8,372 líneas de código Wayland en paralelo con 8 subagentes
 - No se aplicó SDD/TDD — código escrito directamente sin gates de diseño
 - Resultado: 83+ bugs (5 blockers, 18 críticos, 42 mayores, 18 menores)
 
 ### Fase 2: Review adversarial
+
 - Se lanzó un reviewer con contexto fresco para auditar todo el código
 - Reporte: `.pi/fresh-review-wayland.md` (48.5 KB)
 - Bugs más graves encontrados:
@@ -31,31 +33,34 @@ Esta sesión reescribió el compositor Wayland de termux-x11 desde cero después
   - `lorie-wayland` static library nunca linkeado a `libXlorie.so`
 
 ### Fase 3: Decisión del usuario
+
 - Opción A: Parchear el código existente (rápido pero técnicamente incorrecto)
 - **Opción B**: Reescribir desde cero con TDD y PRs encadenados ✅ ELEGIDA
 - Estrategia: 9 PRs de ≤400 líneas cada uno
 
 ### Fase 4: Fase 0 — Test Framework
+
 - Se creó `lorie_test.h` desde cero (zero deps, Android/Bionic compatible)
 - Framework con assertions, suites, runner, y recovery via setjmp/longjmp
 - Tests: 11 suites, 53 tests totales
 
 ### Fase 5: PRs 1-10 (rewrite)
 
-| PR | Componente | Líneas | Estado |
-|----|-----------|--------|--------|
-| #1 | Build system + submodules + tests | 212 | ✅ |
-| #2 | Core compositor + output | ~617 | ✅ |
-| #3 | Surface management | 369 | ✅ |
-| #4 | GLES2/EGL renderer | ~513 | ✅ |
-| #5 | Input + seat | 324 | ✅ |
-| #6 | Protocols (xdg-shell, linux-dmabuf, data-device) | ~603 | ✅ |
-| #7 | XWayland integration | 347 | ✅ |
-| #8 | Java layer + JNI | 342 | ✅ |
-| #9 | Integration + docs | 308 | ✅ |
-| #10 | SHM buffer import + texture binding | 155 | ✅ |
+| PR  | Componente                                       | Líneas | Estado |
+| --- | ------------------------------------------------ | ------ | ------ |
+| #1  | Build system + submodules + tests                | 212    | ✅     |
+| #2  | Core compositor + output                         | ~617   | ✅     |
+| #3  | Surface management                               | 369    | ✅     |
+| #4  | GLES2/EGL renderer                               | ~513   | ✅     |
+| #5  | Input + seat                                     | 324    | ✅     |
+| #6  | Protocols (xdg-shell, linux-dmabuf, data-device) | ~603   | ✅     |
+| #7  | XWayland integration                             | 347    | ✅     |
+| #8  | Java layer + JNI                                 | 342    | ✅     |
+| #9  | Integration + docs                               | 308    | ✅     |
+| #10 | SHM buffer import + texture binding              | 155    | ✅     |
 
 ### Fase 6: Auditoría manual de compilación
+
 - Se revisaron todos los archivos buscando errores de integración
 - **11 errores críticos corregidos**:
   1. compositor.c: NULL callback en wl_output global
@@ -71,6 +76,7 @@ Esta sesión reescribió el compositor Wayland de termux-x11 desde cero después
   11. wayland-protocols.cmake: protocolo core duplicado
 
 ### Fase 7: Push a GitHub
+
 - Fork creado: `lambert-xD/termux-x11`
 - Branch: `wayland-compositor-rewrite`
 - 113 archivos commiteados, 15,999 líneas agregadas
@@ -129,18 +135,28 @@ git submodule update --init --recursive
 ```
 
 Dependencias Ubuntu/Debian:
+
 ```bash
 sudo apt install cmake ninja-build wayland-scanner \
     libwayland-dev libpixman-1-dev openjdk-17-jdk
 ```
 
 Compilar:
+
 ```bash
 export ANDROID_HOME=$HOME/Android/Sdk
 export ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/25.2.9519653
 ./gradlew assembleDebug
 ```
 
+## Sesión Pi Exportada
+
+La sesión completa de Pi (791 líneas JSONL, 3.7 MB) está disponible como Gist privado:
+
+**https://gist.github.com/lambert-xD/7390d05851008d19938d4f47fb7ed600**
+
+Contiene todos los mensajes, tool calls, resultados de subagentes, y metadatos de esta sesión.
+
 ---
 
-*Generado automáticamente por Pi — Sesión termux-x11 Wayland Compositor*
+_Generado automáticamente por Pi — Sesión termux-x11 Wayland Compositor_
