@@ -20,6 +20,7 @@ extern int lorie_test_xwayland_suite(struct lorie_test_suite* suite);
 extern int lorie_test_jni_suite(struct lorie_test_suite* suite);
 extern int lorie_test_integration_suite(struct lorie_test_suite* suite);
 extern int lorie_test_shm_texture_suite(struct lorie_test_suite* suite);
+extern int lorie_test_renderer_damage_suite(struct lorie_test_suite* suite);
 
 int main(int argc, char** argv) {
     struct lorie_test_suite framework_suite;
@@ -58,6 +59,9 @@ int main(int argc, char** argv) {
     struct lorie_test_suite shm_texture_suite;
     lorie_test_shm_texture_suite(&shm_texture_suite);
 
+    struct lorie_test_suite renderer_damage_suite;
+    lorie_test_renderer_damage_suite(&renderer_damage_suite);
+
     struct lorie_test_suite* suites[] = {
         &framework_suite,
         &build_suite,
@@ -71,6 +75,7 @@ int main(int argc, char** argv) {
         &jni_suite,
         &integration_suite,
         &shm_texture_suite,
+        &renderer_damage_suite,
     };
 
     return lorie_test_main(argc, argv, suites, sizeof(suites) / sizeof(suites[0]));

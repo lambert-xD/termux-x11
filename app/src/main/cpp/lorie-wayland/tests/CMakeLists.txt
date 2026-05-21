@@ -31,6 +31,7 @@ set(LORIE_TEST_SOURCES
     test_integration.c
     test_shm_texture.c
     test_buffer_stubs.c
+    test_renderer_damage.c
 )
 
 add_executable(lorie-wayland-tests ${LORIE_TEST_SOURCES})

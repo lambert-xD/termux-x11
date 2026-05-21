@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <pixman.h>
 
 struct lorie_surface;
 
@@ -21,6 +22,10 @@ void lorie_renderer_remove_surface(struct lorie_renderer *r, struct lorie_surfac
 void lorie_renderer_damage_surface(struct lorie_renderer *r, struct lorie_surface *s,
                                     int32_t x, int32_t y, int32_t w, int32_t h);
 int lorie_renderer_commit(struct lorie_renderer *r);
+
+/* Test helper: returns the accumulated damage region for a surface */
+pixman_region32_t *lorie_renderer_surface_get_damage(struct lorie_renderer *r,
+                                                       struct lorie_surface *s);
 
 extern atomic_int lorie_renderer_filtering;
 
