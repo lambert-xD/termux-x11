@@ -123,6 +123,91 @@ static void test_clipboard_set_selection_with_source(void) {
     ASSERT_FALSE(g_hook_called);
 }
 
+/* Test 6: MIME type text/plain is supported for clipboard */
+static void test_clipboard_mime_type_text_plain(void) {
+    ASSERT_TRUE(lorie_clipboard_mime_type_supported("text/plain"));
+}
+
+/* Test 7: MIME type text/plain;charset=utf-8 is supported */
+static void test_clipboard_mime_type_text_plain_utf8(void) {
+    ASSERT_TRUE(lorie_clipboard_mime_type_supported("text/plain;charset=utf-8"));
+}
+
+/* Test 8: Non-text MIME types are rejected */
+static void test_clipboard_mime_type_rejects_image(void) {
+    ASSERT_FALSE(lorie_clipboard_mime_type_supported("image/png"));
+    ASSERT_FALSE(lorie_clipboard_mime_type_supported("application/octet-stream"));
+    ASSERT_FALSE(lorie_clipboard_mime_type_supported(""));
+    ASSERT_FALSE(lorie_clipboard_mime_type_supported(NULL));
+}
+
+/* Test 9: read_pipe handles empty data gracefully */
+static void test_clipboard_read_pipe_empty(void) {
+    int fd[2];
+    ASSERT_EQ_INT(0, pipe(fd));
+    close(fd[1]);
+
+    char *text = NULL;
+    size_t len = 0;
+    int ret = lorie_clipboard_read_pipe(fd[0], &text, &len);
+    close(fd[0]);
+
+    ASSERT_EQ_INT(0, ret);
+    ASSERT_EQ_INT(0, (int)len);
+    free(text);
+}
+
+/* Test 10: read_pipe handles data larger than chunk size */
+static void test_clipboard_read_pipe_large(void) {
+    int fd[2];
+    ASSERT_EQ_INT(0, pipe(fd));
+
+    size_t total = 8192 + 2048; /* larger than 4096 chunk size */
+    char *send_buf = malloc(total);
+    ASSERT_NOT_NULL(send_buf);
+    for (size_t i = 0; i < total; i++) send_buf[i] = (char)('a' + (i % 26));
+
+    ssize_t w = write(fd[1], send_buf, total);
+    ASSERT_EQ_INT((int)total, (int)w);
+    close(fd[1]);
+
+    char *text = NULL;
+    size_t len = 0;
+    int ret = lorie_clipboard_read_pipe(fd[0], &text, &len);
+    close(fd[0]);
+
+    ASSERT_EQ_INT(0, ret);
+    ASSERT_NOT_NULL(text);
+    ASSERT_EQ_INT((int)total, (int)len);
+    ASSERT_EQ_INT(0, memcmp(send_buf, text, total));
+    free(text);
+    free(send_buf);
+}
+
+/* Test 11: callback is not invoked for empty text */
+static void test_clipboard_callback_not_called_for_empty(void) {
+    struct lorie_clipboard *cb = g_comp->clipboard;
+    ASSERT_NOT_NULL(cb);
+    lorie_clipboard_set_text_callback(cb, test_text_hook, NULL);
+
+    int fd[2];
+    ASSERT_EQ_INT(0, pipe(fd));
+    close(fd[1]);
+
+    char *text = NULL;
+    size_t len = 0;
+    int ret = lorie_clipboard_read_pipe(fd[0], &text, &len);
+    close(fd[0]);
+
+    ASSERT_EQ_INT(0, ret);
+    ASSERT_EQ_INT(0, (int)len);
+
+    /* Manually invoke callback with empty data */
+    test_text_hook(text, len, NULL);
+    ASSERT_FALSE(g_hook_called); /* callback should not set flag for empty */
+    free(text);
+}
+
 int lorie_test_clipboard_suite(struct lorie_test_suite *suite) {
     lorie_suite_init(suite, "clipboard", setup, teardown);
     SUITE_ADD(suite, test_clipboard_exists);
@@ -130,5 +215,11 @@ int lorie_test_clipboard_suite(struct lorie_test_suite *suite) {
     SUITE_ADD(suite, test_clipboard_wayland_to_android);
     SUITE_ADD(suite, test_clipboard_set_selection_no_crash);
     SUITE_ADD(suite, test_clipboard_set_selection_with_source);
+    SUITE_ADD(suite, test_clipboard_mime_type_text_plain);
+    SUITE_ADD(suite, test_clipboard_mime_type_text_plain_utf8);
+    SUITE_ADD(suite, test_clipboard_mime_type_rejects_image);
+    SUITE_ADD(suite, test_clipboard_read_pipe_empty);
+    SUITE_ADD(suite, test_clipboard_read_pipe_large);
+    SUITE_ADD(suite, test_clipboard_callback_not_called_for_empty);
     return 0;
 }
