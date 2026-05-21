@@ -23,6 +23,7 @@ struct lorie_compositor {
     struct wl_global *xdg_shell_global;
     struct wl_global *linux_dmabuf_global;
     struct wl_global *data_device_manager_global;
+    struct wl_global *viewporter_global;
     struct wl_list outputs;
     struct wl_list surfaces;
     struct wl_list clients;
@@ -44,6 +45,7 @@ void lorie_compositor_set_window(struct lorie_compositor *c, ANativeWindow *wind
 struct wl_global *lorie_xdg_shell_create(struct wl_display *display);
 struct wl_global *lorie_linux_dmabuf_create(struct wl_display *display);
 struct wl_global *lorie_data_device_manager_create(struct wl_display *display);
+struct wl_global *lorie_viewporter_create(struct wl_display *display);
 
 /* Output API */
 struct lorie_output {
@@ -76,6 +78,7 @@ struct lorie_surface {
     int pending_attached;
     int32_t pending_x, pending_y;
     int32_t x, y, width, height;
+    int32_t logical_width, logical_height;
     int32_t buffer_scale;
     int32_t buffer_transform;
     pixman_region32_t damage;
@@ -84,6 +87,13 @@ struct lorie_surface {
     struct wl_list subsurface_link;
     struct wl_list subsurfaces;
     void *buffer; /* LorieBuffer* — imported from wl_shm_buffer */
+    struct wl_resource *viewport_resource;
+    struct {
+        double src_x, src_y, src_w, src_h;
+        int has_src;
+        int32_t dst_w, dst_h;
+        int has_dst;
+    } viewport, pending_viewport;
 };
 
 struct lorie_region {
@@ -105,6 +115,7 @@ struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,
                                                      struct wl_client *client,
                                                      uint32_t id);
 void lorie_surface_destroy_internal(struct lorie_surface *s);
+void lorie_surface_compute_logical_size(struct lorie_surface *s);
 
 /* Callbacks implemented in surface.c */
 void compositor_create_surface(struct wl_client *client,

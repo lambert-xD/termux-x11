@@ -71,6 +71,31 @@ static void surface_set_input_region(struct wl_client *client,
     (void)client; (void)resource; (void)region;
 }
 
+void lorie_surface_compute_logical_size(struct lorie_surface *s) {
+    if (!s) return;
+
+    int32_t src_w = s->viewport.has_src ? (int32_t)s->viewport.src_w
+                                        : s->width / s->buffer_scale;
+    int32_t src_h = s->viewport.has_src ? (int32_t)s->viewport.src_h
+                                        : s->height / s->buffer_scale;
+
+    int32_t logical_w = s->viewport.has_dst ? s->viewport.dst_w : src_w;
+    int32_t logical_h = s->viewport.has_dst ? s->viewport.dst_h : src_h;
+
+    /* Swap width/height for 90° and 270° transforms */
+    if (s->buffer_transform == WL_OUTPUT_TRANSFORM_90 ||
+        s->buffer_transform == WL_OUTPUT_TRANSFORM_270 ||
+        s->buffer_transform == WL_OUTPUT_TRANSFORM_FLIPPED_90 ||
+        s->buffer_transform == WL_OUTPUT_TRANSFORM_FLIPPED_270) {
+        int32_t tmp = logical_w;
+        logical_w = logical_h;
+        logical_h = tmp;
+    }
+
+    s->logical_width = logical_w > 0 ? logical_w : 0;
+    s->logical_height = logical_h > 0 ? logical_h : 0;
+}
+
 static void surface_commit(struct wl_client *client,
                            struct wl_resource *resource) {
     struct lorie_surface *s = wl_resource_get_user_data(resource);
@@ -112,9 +137,17 @@ static void surface_commit(struct wl_client *client,
             }
         }
     }
-    if (s->compositor && s->compositor->renderer && s->width > 0 && s->height > 0) {
+
+    /* Apply double-buffered viewport state */
+    s->viewport = s->pending_viewport;
+
+    /* Compute logical size from buffer, transform, scale and viewport */
+    lorie_surface_compute_logical_size(s);
+
+    if (s->compositor && s->compositor->renderer &&
+        s->logical_width > 0 && s->logical_height > 0) {
         lorie_renderer_damage_surface(s->compositor->renderer, s,
-                                       0, 0, s->width, s->height);
+                                       0, 0, s->logical_width, s->logical_height);
     }
 
     struct lorie_frame_callback *cb, *tmp;
