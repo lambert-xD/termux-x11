@@ -157,11 +157,9 @@ struct lorie_compositor *lorie_compositor_create(void) {
         goto fail_globals;
     }
 
-    c->linux_dmabuf_global = lorie_linux_dmabuf_create(c->display);
-    if (!c->linux_dmabuf_global) {
-        LOGE("Failed to create linux_dmabuf global");
-        goto fail_globals;
-    }
+    /* linux_dmabuf_global is created conditionally after renderer init
+     * via lorie_compositor_create_dmabuf_global() */
+    c->linux_dmabuf_global = NULL;
 
     c->data_device_manager_global = lorie_data_device_manager_create(c->display);
     if (!c->data_device_manager_global) {
@@ -294,6 +292,17 @@ void lorie_compositor_stop(struct lorie_compositor *c) {
     pthread_join(c->event_loop_thread, NULL);
 
     LOGI("Compositor stopped");
+}
+
+void lorie_compositor_create_dmabuf_global(struct lorie_compositor *c) {
+    if (!c || c->linux_dmabuf_global)
+        return;
+    c->linux_dmabuf_global = lorie_linux_dmabuf_create(c->display, c);
+    if (!c->linux_dmabuf_global) {
+        LOGE("Failed to create linux_dmabuf global");
+    } else {
+        LOGI("linux_dmabuf global created");
+    }
 }
 
 void lorie_compositor_set_window(struct lorie_compositor *c,

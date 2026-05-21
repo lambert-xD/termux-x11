@@ -164,6 +164,9 @@ Java_com_termux_x11_WaylandEntryPoint_start(JNIEnv *env, jclass clazz,
     g_renderer = lorie_renderer_create();
     if (!g_renderer || lorie_renderer_init(g_renderer) != 0) goto fail;
     g_compositor->renderer = g_renderer;
+    if (lorie_renderer_has_dmabuf_import(g_renderer)) {
+        lorie_compositor_create_dmabuf_global(g_compositor);
+    }
     if (lorie_compositor_start(g_compositor) != 0) goto fail;
     return JNI_TRUE;
 fail:

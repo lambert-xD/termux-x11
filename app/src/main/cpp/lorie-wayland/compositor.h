@@ -43,9 +43,12 @@ void lorie_compositor_set_window(struct lorie_compositor *c, ANativeWindow *wind
 
 /* Protocol globals */
 struct wl_global *lorie_xdg_shell_create(struct wl_display *display);
-struct wl_global *lorie_linux_dmabuf_create(struct wl_display *display);
+struct wl_global *lorie_linux_dmabuf_create(struct wl_display *display, struct lorie_compositor *compositor);
 struct wl_global *lorie_data_device_manager_create(struct wl_display *display);
 struct wl_global *lorie_viewporter_create(struct wl_display *display);
+
+/* Conditional global creation (called after renderer init) */
+void lorie_compositor_create_dmabuf_global(struct lorie_compositor *c);
 
 /* Output API */
 struct lorie_output {
