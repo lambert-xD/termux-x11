@@ -23,6 +23,7 @@ set(LORIE_TEST_SOURCES
     ../protocols/xdg-shell.c
     ../protocols/linux-dmabuf.c
     ../protocols/wl-data-device-manager.c
+    ../protocols/viewporter.c
     ../xwayland.c
     test_xwayland.c
     test_jni.c
@@ -32,6 +33,8 @@ set(LORIE_TEST_SOURCES
     test_shm_texture.c
     test_buffer_stubs.c
     test_renderer_damage.c
+    test_transform.c
+    test_viewporter.c
 )
 
 add_executable(lorie-wayland-tests ${LORIE_TEST_SOURCES})
