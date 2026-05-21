@@ -208,6 +208,118 @@ static void test_clipboard_callback_not_called_for_empty(void) {
     free(text);
 }
 
+/* Test 12: Android text is stored and retrievable */
+static void test_clipboard_android_to_wayland(void) {
+    struct lorie_clipboard *cb = g_comp->clipboard;
+    ASSERT_NOT_NULL(cb);
+
+    lorie_clipboard_send_android_text(cb, "android text", 12);
+
+    size_t len = 0;
+    const char *text = lorie_clipboard_get_android_text(cb, &len);
+    ASSERT_NOT_NULL(text);
+    ASSERT_EQ_INT(12, (int)len);
+    ASSERT_EQ_STR("android text", text);
+}
+
+/* Test 13: loop prevention suppresses echo from Wayland within 500ms */
+static void test_clipboard_loop_prevention(void) {
+    struct lorie_clipboard *cb = g_comp->clipboard;
+    ASSERT_NOT_NULL(cb);
+
+    lorie_clipboard_send_android_text(cb, "first", 5);
+
+    size_t len = 0;
+    const char *text = lorie_clipboard_get_android_text(cb, &len);
+    ASSERT_EQ_STR("first", text);
+
+    /* Simulate that Wayland just set the clipboard (echo) */
+    lorie_clipboard_set_last_source(cb, CLIPBOARD_SOURCE_WAYLAND);
+    lorie_clipboard_set_timestamp(cb, lorie_clipboard_get_timestamp(cb));
+
+    /* Try to send again immediately — should be ignored due to loop prevention */
+    lorie_clipboard_send_android_text(cb, "echo", 4);
+
+    text = lorie_clipboard_get_android_text(cb, &len);
+    ASSERT_EQ_INT(5, (int)len);
+    ASSERT_EQ_STR("first", text);
+}
+
+/* Test 14: loop prevention allows new text after 500ms gap */
+static void test_clipboard_loop_prevention_expired(void) {
+    struct lorie_clipboard *cb = g_comp->clipboard;
+    ASSERT_NOT_NULL(cb);
+
+    lorie_clipboard_send_android_text(cb, "first", 5);
+
+    /* Simulate old Wayland update (more than 500ms ago) */
+    lorie_clipboard_set_last_source(cb, CLIPBOARD_SOURCE_WAYLAND);
+    lorie_clipboard_set_timestamp(cb, 0); /* epoch = very old */
+
+    lorie_clipboard_send_android_text(cb, "second", 6);
+
+    size_t len = 0;
+    const char *text = lorie_clipboard_get_android_text(cb, &len);
+    ASSERT_EQ_INT(6, (int)len);
+    ASSERT_EQ_STR("second", text);
+}
+
+/* Test 15: size cap rejects oversized payload (>1 MiB) */
+static void test_clipboard_size_cap(void) {
+    struct lorie_clipboard *cb = g_comp->clipboard;
+    ASSERT_NOT_NULL(cb);
+
+    size_t big_size = 1024 * 1024 + 1;
+    char *big = malloc(big_size);
+    ASSERT_NOT_NULL(big);
+    memset(big, 'x', big_size);
+
+    lorie_clipboard_send_android_text(cb, big, big_size);
+
+    size_t len = 0;
+    const char *text = lorie_clipboard_get_android_text(cb, &len);
+    ASSERT_EQ_INT(0, (int)len);
+    ASSERT_NULL(text);
+    free(big);
+}
+
+/* Test 16: stored text is guaranteed null-terminated */
+static void test_clipboard_null_terminated(void) {
+    struct lorie_clipboard *cb = g_comp->clipboard;
+    ASSERT_NOT_NULL(cb);
+
+    const char raw[7] = {'n', 'o', 'n', 'u', 'l', 'l', 'x'};
+    lorie_clipboard_send_android_text(cb, raw, 7);
+
+    size_t len = 0;
+    const char *text = lorie_clipboard_get_android_text(cb, &len);
+    ASSERT_EQ_INT(7, (int)len);
+    ASSERT_EQ_INT('\0', text[7]);
+}
+
+/* Test 17: source tag tracks Android after send */
+static void test_clipboard_source_tag_android(void) {
+    struct lorie_clipboard *cb = g_comp->clipboard;
+    ASSERT_NOT_NULL(cb);
+
+    lorie_clipboard_send_android_text(cb, "hello", 5);
+    ASSERT_EQ_INT(CLIPBOARD_SOURCE_ANDROID, lorie_clipboard_get_last_source(cb));
+}
+
+/* Test 18: empty text is handled gracefully */
+static void test_clipboard_empty_text(void) {
+    struct lorie_clipboard *cb = g_comp->clipboard;
+    ASSERT_NOT_NULL(cb);
+
+    lorie_clipboard_send_android_text(cb, "", 0);
+
+    size_t len = 0;
+    const char *text = lorie_clipboard_get_android_text(cb, &len);
+    ASSERT_EQ_INT(0, (int)len);
+    ASSERT_NOT_NULL(text);
+    ASSERT_EQ_INT('\0', text[0]);
+}
+
 int lorie_test_clipboard_suite(struct lorie_test_suite *suite) {
     lorie_suite_init(suite, "clipboard", setup, teardown);
     SUITE_ADD(suite, test_clipboard_exists);
@@ -221,5 +333,12 @@ int lorie_test_clipboard_suite(struct lorie_test_suite *suite) {
     SUITE_ADD(suite, test_clipboard_read_pipe_empty);
     SUITE_ADD(suite, test_clipboard_read_pipe_large);
     SUITE_ADD(suite, test_clipboard_callback_not_called_for_empty);
+    SUITE_ADD(suite, test_clipboard_android_to_wayland);
+    SUITE_ADD(suite, test_clipboard_loop_prevention);
+    SUITE_ADD(suite, test_clipboard_loop_prevention_expired);
+    SUITE_ADD(suite, test_clipboard_size_cap);
+    SUITE_ADD(suite, test_clipboard_null_terminated);
+    SUITE_ADD(suite, test_clipboard_source_tag_android);
+    SUITE_ADD(suite, test_clipboard_empty_text);
     return 0;
 }
