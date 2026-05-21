@@ -23,9 +23,11 @@ void lorie_renderer_damage_surface(struct lorie_renderer *r, struct lorie_surfac
                                     int32_t x, int32_t y, int32_t w, int32_t h);
 int lorie_renderer_commit(struct lorie_renderer *r);
 
-/* Test helper: returns the accumulated damage region for a surface */
+/* Test helpers */
 pixman_region32_t *lorie_renderer_surface_get_damage(struct lorie_renderer *r,
                                                        struct lorie_surface *s);
+const float *lorie_renderer_surface_get_transform(struct lorie_renderer *r,
+                                                    struct lorie_surface *s);
 
 extern atomic_int lorie_renderer_filtering;
 

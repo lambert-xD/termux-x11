@@ -16,9 +16,10 @@ static const char vertex_shader_src[] =
     "attribute vec4 position;\n"
     "attribute vec2 texCoords;\n"
     "varying vec2 outTexCoords;\n"
+    "uniform mat4 transform;\n"
     "void main(void) {\n"
     "    outTexCoords = texCoords;\n"
-    "    gl_Position = position;\n"
+    "    gl_Position = transform * position;\n"
     "}\n";
 
 static const char fragment_shader_src[] =
@@ -43,6 +44,7 @@ struct renderer_surface {
     struct lorie_surface *surface;
     int z_index;
     pixman_region32_t accumulated_damage;
+    float transform[16];
 };
 
 struct lorie_renderer {
@@ -55,7 +57,7 @@ struct lorie_renderer {
     EGLConfig egl_config;
     ANativeWindow *current_window;
     GLuint program;
-    GLint u_texture, a_position, a_texcoords;
+    GLint u_texture, u_transform, a_position, a_texcoords;
     int first_commit;
 };
 
@@ -198,6 +200,7 @@ void lorie_renderer_set_window(struct lorie_renderer *r, ANativeWindow *window) 
         if (!r->program) {
             r->program = create_program(vertex_shader_src, fragment_shader_src);
             r->u_texture = glGetUniformLocation(r->program, "texture");
+            r->u_transform = glGetUniformLocation(r->program, "transform");
             r->a_position = glGetAttribLocation(r->program, "position");
             r->a_texcoords = glGetAttribLocation(r->program, "texCoords");
         }
@@ -263,6 +266,85 @@ pixman_region32_t *lorie_renderer_surface_get_damage(struct lorie_renderer *r,
     return result;
 }
 
+const float *lorie_renderer_surface_get_transform(struct lorie_renderer *r,
+                                                    struct lorie_surface *s) {
+    if (!r || !s) return NULL;
+    const float *result = NULL;
+    pthread_mutex_lock(&r->surfaces_lock);
+    struct renderer_surface *rs;
+    wl_list_for_each(rs, &r->surfaces, link) {
+        if (rs->surface == s) {
+            result = rs->transform;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&r->surfaces_lock);
+    return result;
+}
+
+static void get_output_size(struct lorie_surface *s, int32_t *out_w, int32_t *out_h) {
+    *out_w = 1920;
+    *out_h = 1080;
+    if (!s->compositor || wl_list_empty(&s->compositor->outputs))
+        return;
+    struct lorie_output *output =
+        wl_container_of(s->compositor->outputs.next, output, link);
+    if (output->width > 0 && output->height > 0) {
+        *out_w = output->width;
+        *out_h = output->height;
+    }
+}
+
+static void compute_transform_matrix(struct lorie_surface *s, float *M) {
+    int32_t out_w, out_h;
+    get_output_size(s, &out_w, &out_h);
+
+    float sx = (float)s->logical_width / out_w;
+    float sy = (float)s->logical_height / out_h;
+    float tx = -1.0f + (float)(2 * s->x + s->logical_width) / out_w;
+    float ty = 1.0f - (float)(2 * s->y + s->logical_height) / out_h;
+
+    float cos_r = 1.0f, sin_r = 0.0f;
+    int flip_x = 1;
+
+    switch (s->buffer_transform) {
+        case WL_OUTPUT_TRANSFORM_NORMAL:
+            cos_r = 1.0f; sin_r = 0.0f; flip_x = 1; break;
+        case WL_OUTPUT_TRANSFORM_90:
+            cos_r = 0.0f; sin_r = 1.0f; flip_x = 1; break;
+        case WL_OUTPUT_TRANSFORM_180:
+            cos_r = -1.0f; sin_r = 0.0f; flip_x = 1; break;
+        case WL_OUTPUT_TRANSFORM_270:
+            cos_r = 0.0f; sin_r = -1.0f; flip_x = 1; break;
+        case WL_OUTPUT_TRANSFORM_FLIPPED:
+            cos_r = 1.0f; sin_r = 0.0f; flip_x = -1; break;
+        case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+            cos_r = 0.0f; sin_r = 1.0f; flip_x = -1; break;
+        case WL_OUTPUT_TRANSFORM_FLIPPED_180:
+            cos_r = -1.0f; sin_r = 0.0f; flip_x = -1; break;
+        case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+            cos_r = 0.0f; sin_r = -1.0f; flip_x = -1; break;
+        default:
+            cos_r = 1.0f; sin_r = 0.0f; flip_x = 1; break;
+    }
+
+    /* M = T * S * R * F  (column-major) */
+    float rf00 = cos_r * flip_x;
+    float rf01 = -sin_r;
+    float rf10 = sin_r * flip_x;
+    float rf11 = cos_r;
+
+    float srf00 = sx * rf00;
+    float srf01 = sx * rf01;
+    float srf10 = sy * rf10;
+    float srf11 = sy * rf11;
+
+    M[0]  = srf00;  M[4]  = srf01;  M[8]  = 0.0f;  M[12] = 0.0f;
+    M[1]  = srf10;  M[5]  = srf11;  M[9]  = 0.0f;  M[13] = 0.0f;
+    M[2]  = 0.0f;   M[6]  = 0.0f;   M[10] = 1.0f;  M[14] = 0.0f;
+    M[3]  = tx;     M[7]  = ty;     M[11] = 0.0f;  M[15] = 1.0f;
+}
+
 static int cmp_z(const void *a, const void *b) {
     struct renderer_surface * const *ra = (struct renderer_surface * const *)a;
     struct renderer_surface * const *rb = (struct renderer_surface * const *)b;
@@ -282,6 +364,15 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
     pthread_mutex_unlock(&r->surfaces_lock);
 
     if (count > 1) qsort(sorted, count, sizeof(sorted[0]), cmp_z);
+
+    /* Compute per-surface transform matrices before EGL lock */
+    for (int j = 0; j < count; j++) {
+        struct renderer_surface *rs = sorted[j];
+        struct lorie_surface *s = rs->surface;
+        if (s) {
+            compute_transform_matrix(s, rs->transform);
+        }
+    }
 
     /* Fire frame callbacks BEFORE acquiring EGL lock */
     for (int j = 0; j < count; j++) {
@@ -336,6 +427,7 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
                 continue;
             }
             pixman_box32_t *bbox = pixman_region32_extents(&rs->accumulated_damage);
+            glUniformMatrix4fv(r->u_transform, 1, GL_FALSE, rs->transform);
             glEnable(GL_SCISSOR_TEST);
             glScissor(bbox->x1, bbox->y1,
                       bbox->x2 - bbox->x1, bbox->y2 - bbox->y1);
