@@ -197,7 +197,11 @@ Java_com_termux_x11_WaylandEntryPoint_start(JNIEnv *env, jclass clazz,
 
     /* Store JavaVM for clipboard callback */
     (*env)->GetJavaVM(env, &g_jvm);
-    g_lorie_view = (*env)->NewGlobalRef(env, clazz);
+    jclass lorieViewClass = (*env)->FindClass(env, "com/termux/x11/LorieWaylandView");
+    if (lorieViewClass) {
+        g_lorie_view = (*env)->NewGlobalRef(env, lorieViewClass);
+        (*env)->DeleteLocalRef(env, lorieViewClass);
+    }
 
     g_compositor = lorie_compositor_create();
     if (!g_compositor) return JNI_FALSE;

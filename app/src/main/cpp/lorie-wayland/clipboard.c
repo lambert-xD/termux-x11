@@ -139,6 +139,15 @@ static void *clipboard_worker(void *data) {
     return NULL;
 }
 
+void lorie_clipboard_clear_source(struct lorie_clipboard *cb, struct wl_resource *source_resource) {
+    if (!cb) return;
+    pthread_mutex_lock(&cb->lock);
+    if (cb->current_source == source_resource) {
+        cb->current_source = NULL;
+    }
+    pthread_mutex_unlock(&cb->lock);
+}
+
 void lorie_clipboard_set_selection(struct lorie_clipboard *cb, struct wl_resource *source_resource) {
     if (!cb) return;
 

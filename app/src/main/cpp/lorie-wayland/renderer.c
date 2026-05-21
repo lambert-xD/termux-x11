@@ -402,10 +402,14 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
     int count = 0;
     pthread_mutex_lock(&r->surfaces_lock);
     wl_list_for_each(rs, &r->surfaces, link) count++;
-    struct renderer_surface *sorted[64];
+    struct renderer_surface **sorted = calloc(count, sizeof(*sorted));
+    if (!sorted) {
+        pthread_mutex_unlock(&r->surfaces_lock);
+        return -1;
+    }
     int i = 0;
     wl_list_for_each(rs, &r->surfaces, link) {
-        if (i < 64) sorted[i++] = rs;
+        if (i < count) sorted[i++] = rs;
     }
     pthread_mutex_unlock(&r->surfaces_lock);
 
@@ -437,6 +441,7 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
     if (r->egl_surface == EGL_NO_SURFACE || r->egl_display == EGL_NO_DISPLAY) {
         r->first_commit = 0;
         pthread_mutex_unlock(&r->egl_lock);
+        free(sorted);
         return -1;
     }
     eglMakeCurrent(r->egl_display, r->egl_surface, r->egl_surface, r->egl_context);
@@ -497,6 +502,7 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
 
     eglSwapBuffers(r->egl_display, r->egl_surface);
     pthread_mutex_unlock(&r->egl_lock);
+    free(sorted);
     return 0;
 }
 

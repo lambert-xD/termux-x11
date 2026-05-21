@@ -115,6 +115,7 @@ static void viewport_handle_resource_destroy(struct wl_resource *resource) {
     if (s) {
         s->viewport_resource = NULL;
         memset(&s->pending_viewport, 0, sizeof(s->pending_viewport));
+        memset(&s->viewport, 0, sizeof(s->viewport));
     }
 }
 

@@ -108,6 +108,8 @@ static void surface_commit(struct wl_client *client,
             }
         }
         s->buffer_resource = s->pending_buffer;
+        s->x = s->pending_x;
+        s->y = s->pending_y;
         s->pending_buffer = NULL;
         s->pending_attached = 0;
 
@@ -171,6 +173,11 @@ static void surface_set_buffer_scale(struct wl_client *client,
                                      struct wl_resource *resource,
                                      int32_t scale) {
     struct lorie_surface *s = wl_resource_get_user_data(resource);
+    if (scale <= 0) {
+        wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_SCALE,
+                               "buffer_scale must be >= 1");
+        return;
+    }
     s->buffer_scale = scale;
     (void)client;
 }
@@ -204,6 +211,10 @@ static void surface_handle_resource_destroy(struct wl_resource *resource) {
         child->parent = NULL;
         wl_list_remove(&child->subsurface_link);
         wl_list_init(&child->subsurface_link);
+    }
+    if (s->viewport_resource) {
+        wl_resource_destroy(s->viewport_resource);
+        s->viewport_resource = NULL;
     }
     if (s->buffer_resource)
         wl_buffer_send_release(s->buffer_resource);

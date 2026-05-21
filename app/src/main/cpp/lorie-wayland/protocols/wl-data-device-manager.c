@@ -11,6 +11,7 @@ struct lorie_data_device_manager {
 struct lorie_data_source {
     struct wl_resource *resource;
     struct wl_list mime_types;
+    struct lorie_clipboard *clipboard;
 };
 
 struct lorie_mime_type {
@@ -61,6 +62,9 @@ static const struct wl_data_source_interface data_source_impl = {
 static void data_source_handle_destroy(struct wl_resource *resource) {
     struct lorie_data_source *source = wl_resource_get_user_data(resource);
     if (source) {
+        if (source->clipboard) {
+            lorie_clipboard_clear_source(source->clipboard, resource);
+        }
         struct lorie_mime_type *mt, *tmp;
         wl_list_for_each_safe(mt, tmp, &source->mime_types, link) {
             free(mt->type);
@@ -148,6 +152,7 @@ static void data_device_set_selection(struct wl_client *client, struct wl_resour
     }
 
     struct lorie_data_source *source = wl_resource_get_user_data(source_resource);
+    if (source) source->clipboard = device->compositor->clipboard;
     struct lorie_data_offer *offer = calloc(1, sizeof(*offer));
     if (!offer) { wl_client_post_no_memory(client); return; }
     uint32_t id = wl_display_next_serial(wl_client_get_display(device->client));
@@ -214,6 +219,7 @@ static void manager_create_data_source(struct wl_client *client, struct wl_resou
     source->resource = wl_resource_create(client, &wl_data_source_interface, 3, id);
     if (!source->resource) { free(source); wl_client_post_no_memory(client); return; }
     wl_list_init(&source->mime_types);
+    source->clipboard = NULL;
     wl_resource_set_implementation(source->resource, &data_source_impl, source, data_source_handle_destroy);
     (void)resource;
 }
