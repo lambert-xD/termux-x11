@@ -26,6 +26,7 @@ struct lorie_data_offer {
 struct lorie_data_device {
     struct wl_resource *resource;
     struct wl_client *client;
+    struct lorie_compositor *compositor;
 };
 
 /* --- data_source --- */
@@ -118,9 +119,19 @@ static void data_device_start_drag(struct wl_client *c, struct wl_resource *r,
 
 static void data_device_set_selection(struct wl_client *client, struct wl_resource *resource,
                                       struct wl_resource *source_resource, uint32_t serial) {
-    if (!source_resource) return;
-    struct lorie_data_source *source = wl_resource_get_user_data(source_resource);
     struct lorie_data_device *device = wl_resource_get_user_data(resource);
+
+    /* Forward to clipboard for Wayland→Android text transfer */
+    if (device->compositor && device->compositor->clipboard) {
+        lorie_clipboard_set_selection(device->compositor->clipboard, source_resource);
+    }
+
+    if (!source_resource) {
+        wl_data_device_send_selection(device->resource, NULL);
+        return;
+    }
+
+    struct lorie_data_source *source = wl_resource_get_user_data(source_resource);
     struct lorie_data_offer *offer = calloc(1, sizeof(*offer));
     if (!offer) { wl_client_post_no_memory(client); return; }
     uint32_t id = wl_display_next_serial(wl_client_get_display(device->client));
@@ -162,13 +173,15 @@ static void manager_create_data_source(struct wl_client *client, struct wl_resou
 
 static void manager_get_data_device(struct wl_client *client, struct wl_resource *resource,
                                     uint32_t id, struct wl_resource *seat) {
+    struct lorie_compositor *compositor = wl_resource_get_user_data(resource);
     struct lorie_data_device *device = calloc(1, sizeof(*device));
     if (!device) { wl_client_post_no_memory(client); return; }
     device->client = client;
+    device->compositor = compositor;
     device->resource = wl_resource_create(client, &wl_data_device_interface, 3, id);
     if (!device->resource) { free(device); wl_client_post_no_memory(client); return; }
     wl_resource_set_implementation(device->resource, &data_device_impl, device, data_device_handle_destroy);
-    (void)resource; (void)seat;
+    (void)seat;
 }
 
 static void manager_destroy(struct wl_client *client, struct wl_resource *resource) {
@@ -188,6 +201,6 @@ static void manager_bind(struct wl_client *client, void *data, uint32_t version,
     wl_resource_set_implementation(resource, &manager_impl, data, NULL);
 }
 
-struct wl_global *lorie_data_device_manager_create(struct wl_display *display) {
-    return wl_global_create(display, &wl_data_device_manager_interface, 3, NULL, manager_bind);
+struct wl_global *lorie_data_device_manager_create(struct wl_display *display, struct lorie_compositor *c) {
+    return wl_global_create(display, &wl_data_device_manager_interface, 3, c, manager_bind);
 }

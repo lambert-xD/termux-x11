@@ -29,6 +29,41 @@
 
 static struct lorie_compositor *g_compositor = NULL;
 static struct lorie_renderer *g_renderer = NULL;
+static JavaVM *g_jvm = NULL;
+static jobject g_lorie_view = NULL;
+static pthread_mutex_t g_jni_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void clipboard_callback(const char *text, size_t len, void *user_data) {
+    (void)user_data;
+    if (!text || len == 0) return;
+
+    JNIEnv *env = NULL;
+    JavaVMAttachArgs args = {JNI_VERSION_1_6, "WaylandClipboardThread", NULL};
+
+    int result = (*g_jvm)->AttachCurrentThread(g_jvm, &env, &args);
+    if (result != 0 || !env) {
+        LOGE("Failed to attach JNI thread for clipboard");
+        return;
+    }
+
+    pthread_mutex_lock(&g_jni_mutex);
+    jbyteArray jbytes = (*env)->NewByteArray(env, (jsize)len);
+    if (jbytes) {
+        (*env)->SetByteArrayRegion(env, jbytes, 0, (jsize)len, (jbyte*)text);
+        (*env)->CallStaticVoidMethod(env, g_lorie_view,
+            (*env)->GetStaticMethodID(env, g_lorie_view,
+                "setClipboardText", "([B)V"),
+            jbytes);
+        (*env)->DeleteLocalRef(env, jbytes);
+        if ((*env)->ExceptionCheck(env)) {
+            (*env)->ExceptionDescribe(env);
+            (*env)->ExceptionClear(env);
+        }
+    }
+    pthread_mutex_unlock(&g_jni_mutex);
+
+    (*g_jvm)->DetachCurrentThread(g_jvm);
+}
 
 /* Forward declarations for dynamic registration */
 JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_surfaceChanged(JNIEnv*, jobject, jobject);
@@ -37,11 +72,12 @@ JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_sendTouchEvent(JNIEn
 JNIEXPORT jboolean JNICALL Java_com_termux_x11_LorieWaylandView_sendKeyEvent(JNIEnv*, jobject, jint, jint, jboolean);
 JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_sendTextEvent(JNIEnv*, jobject, jbyteArray);
 JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_sendClipboardEvent(JNIEnv*, jobject, jbyteArray);
+JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_setClipboardText(JNIEnv*, jobject, jbyteArray);
 
 /* Exported helpers for unit tests */
 int lorie_clipboard_validate_size(uint32_t count) { return count <= MAX_CLIPBOARD_SIZE; }
 int lorie_keycode_valid(int key_code) { return key_code >= 0 && key_code < 304; }
-const int lorie_wayland_native_method_count = 6;
+const int lorie_wayland_native_method_count = 7;
 
 JNIEXPORT void JNICALL
 Java_com_termux_x11_LorieWaylandView_nativeInit(JNIEnv *env, jclass clazz) {
@@ -58,6 +94,8 @@ Java_com_termux_x11_LorieWaylandView_nativeInit(JNIEnv *env, jclass clazz) {
          (void*)&Java_com_termux_x11_LorieWaylandView_sendTextEvent},
         {"sendClipboardEvent", "([B)V",
          (void*)&Java_com_termux_x11_LorieWaylandView_sendClipboardEvent},
+        {"setClipboardText", "([B)V",
+         (void*)&Java_com_termux_x11_LorieWaylandView_setClipboardText},
     };
     if ((*env)->RegisterNatives(env, clazz, methods,
                                 sizeof(methods)/sizeof(methods[0])) != 0) {
@@ -154,11 +192,33 @@ Java_com_termux_x11_LorieWaylandView_sendClipboardEvent(JNIEnv *env, jobject thi
     (*env)->ReleaseByteArrayElements(env, text, bytes, JNI_ABORT);
 }
 
+JNIEXPORT void JNICALL
+Java_com_termux_x11_LorieWaylandView_setClipboardText(JNIEnv *env, jobject thiz,
+                                                     jbyteArray text) {
+    (void)thiz;
+    if (!text) return;
+    jsize length = (*env)->GetArrayLength(env, text);
+    if (length < 0 || !lorie_clipboard_validate_size((uint32_t)length)) return;
+
+    jbyte *bytes = (*env)->GetByteArrayElements(env, text, NULL);
+    if (!bytes) return;
+
+    /* TODO: Set Android clipboard via ClipboardManager API */
+    LOGI("Wayland clipboard text (%zd bytes): %.*s", (size_t)length, length, (char*)bytes);
+
+    (*env)->ReleaseByteArrayElements(env, text, bytes, JNI_ABORT);
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_termux_x11_WaylandEntryPoint_start(JNIEnv *env, jclass clazz,
                                             jobjectArray args) {
-    (void)env; (void)clazz; (void)args;
+    (void)args;
     if (g_compositor) return JNI_TRUE;
+
+    /* Store JavaVM for clipboard callback */
+    (*env)->GetJavaVM(env, &g_jvm);
+    g_lorie_view = (*env)->NewGlobalRef(env, clazz);
+
     g_compositor = lorie_compositor_create();
     if (!g_compositor) return JNI_FALSE;
     g_renderer = lorie_renderer_create();
@@ -167,6 +227,12 @@ Java_com_termux_x11_WaylandEntryPoint_start(JNIEnv *env, jclass clazz,
     if (lorie_renderer_has_dmabuf_import(g_renderer)) {
         lorie_compositor_create_dmabuf_global(g_compositor);
     }
+
+    /* Register clipboard callback for Wayland→Android forwarding */
+    if (g_compositor->clipboard) {
+        lorie_clipboard_set_text_callback(g_compositor->clipboard, clipboard_callback, NULL);
+    }
+
     if (lorie_compositor_start(g_compositor) != 0) goto fail;
     return JNI_TRUE;
 fail:
@@ -177,6 +243,14 @@ fail:
     }
     lorie_compositor_destroy(g_compositor);
     g_compositor = NULL;
+    if (g_lorie_view) {
+        JNIEnv *env = NULL;
+        if ((*g_jvm)->GetEnv(g_jvm, (void**)&env, JNI_VERSION_1_6) == JNI_OK) {
+            (*env)->DeleteGlobalRef(env, g_lorie_view);
+        }
+        g_lorie_view = NULL;
+    }
+    g_jvm = NULL;
     return JNI_FALSE;
 }
 

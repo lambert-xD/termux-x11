@@ -12,6 +12,7 @@ struct lorie_input;
 struct lorie_output;
 struct lorie_surface;
 struct lorie_region;
+struct lorie_clipboard;
 
 struct lorie_compositor {
     struct wl_display *display;
@@ -24,6 +25,7 @@ struct lorie_compositor {
     struct wl_global *linux_dmabuf_global;
     struct wl_global *data_device_manager_global;
     struct wl_global *viewporter_global;
+    struct lorie_clipboard *clipboard;
     struct wl_list outputs;
     struct wl_list surfaces;
     struct wl_list clients;
@@ -44,7 +46,7 @@ void lorie_compositor_set_window(struct lorie_compositor *c, ANativeWindow *wind
 /* Protocol globals */
 struct wl_global *lorie_xdg_shell_create(struct wl_display *display);
 struct wl_global *lorie_linux_dmabuf_create(struct wl_display *display, struct lorie_compositor *compositor);
-struct wl_global *lorie_data_device_manager_create(struct wl_display *display);
+struct wl_global *lorie_data_device_manager_create(struct wl_display *display, struct lorie_compositor *c);
 struct wl_global *lorie_viewporter_create(struct wl_display *display);
 
 /* Conditional global creation (called after renderer init) */
@@ -112,6 +114,14 @@ struct lorie_shm_pool {
 
 struct lorie_shm_pool *lorie_shm_pool_create(int fd, int32_t size);
 void lorie_shm_pool_destroy(struct lorie_shm_pool *pool);
+
+/* Clipboard API — exposed for tests */
+struct lorie_clipboard *lorie_clipboard_create(struct lorie_compositor *c);
+void lorie_clipboard_destroy(struct lorie_clipboard *cb);
+int lorie_clipboard_read_pipe(int read_fd, char **out_text, size_t *out_len);
+void lorie_clipboard_set_selection(struct lorie_clipboard *cb, struct wl_resource *source_resource);
+void lorie_clipboard_set_text_callback(struct lorie_clipboard *cb,
+    void (*cb_fn)(const char *text, size_t len, void *user_data), void *user_data);
 
 /* Internal API — exposed for tests */
 struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,

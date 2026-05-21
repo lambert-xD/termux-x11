@@ -296,6 +296,7 @@ add_library(Xlorie SHARED
         "lorie-wayland/protocols/viewporter.c"
         "lorie-wayland/xwayland.c"
         "lorie-wayland/wayland-activity.c"
+        "lorie-wayland/clipboard.c"
         "lorie-wayland/main.c")
 target_include_directories(Xlorie PRIVATE ${inc} "libxcvt/include" "wayland/wayland/src" "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_options(Xlorie PRIVATE "-Wl,--as-needed" "-Wl,--no-undefined" "-fvisibility=hidden")

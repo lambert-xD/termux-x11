@@ -161,7 +161,13 @@ struct lorie_compositor *lorie_compositor_create(void) {
      * via lorie_compositor_create_dmabuf_global() */
     c->linux_dmabuf_global = NULL;
 
-    c->data_device_manager_global = lorie_data_device_manager_create(c->display);
+    c->clipboard = lorie_clipboard_create(c);
+    if (!c->clipboard) {
+        LOGE("Failed to create clipboard");
+        goto fail_globals;
+    }
+
+    c->data_device_manager_global = lorie_data_device_manager_create(c->display, c);
     if (!c->data_device_manager_global) {
         LOGE("Failed to create data_device_manager global");
         goto fail_globals;
@@ -215,6 +221,7 @@ void lorie_compositor_destroy(struct lorie_compositor *c) {
         wl_global_destroy(c->linux_dmabuf_global);
     if (c->xdg_shell_global)
         wl_global_destroy(c->xdg_shell_global);
+    lorie_clipboard_destroy(c->clipboard);
     lorie_input_destroy(c->input);
     if (c->shm_global)
         wl_global_destroy(c->shm_global);

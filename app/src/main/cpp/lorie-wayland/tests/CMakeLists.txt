@@ -25,6 +25,7 @@ set(LORIE_TEST_SOURCES
     ../protocols/wl-data-device-manager.c
     ../protocols/viewporter.c
     ../xwayland.c
+    ../clipboard.c
     test_xwayland.c
     test_jni.c
     ../wayland-activity.c
@@ -36,6 +37,7 @@ set(LORIE_TEST_SOURCES
     test_transform.c
     test_viewporter.c
     test_dmabuf.c
+    test_clipboard.c
 )
 
 add_executable(lorie-wayland-tests ${LORIE_TEST_SOURCES})
