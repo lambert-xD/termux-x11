@@ -56,7 +56,8 @@ set(inc "${CMAKE_CURRENT_BINARY_DIR}"
         "xserver/render"
         "xserver/xfixes"
         "xserver/glx"
-        "xserver/exa")
+        "xserver/exa"
+        "lorie-wayland")
 
 set(compile_options
         ${common_compile_options}
@@ -281,10 +282,23 @@ add_library(Xlorie SHARED
         "lorie/InputXKB.c"
         "lorie/renderer.c"
         "lorie/buffer.c"
-        "lorie/activity.c")
-target_include_directories(Xlorie PRIVATE ${inc} "libxcvt/include")
+        "lorie/activity.c"
+        "lorie-wayland/compositor.c"
+        "lorie-wayland/output.c"
+        "lorie-wayland/surface.c"
+        "lorie-wayland/renderer.c"
+        "lorie-wayland/input.c"
+        "lorie-wayland/seat.c"
+        "lorie-wayland/keymap.c"
+        "lorie-wayland/protocols/xdg-shell.c"
+        "lorie-wayland/protocols/linux-dmabuf.c"
+        "lorie-wayland/protocols/wl-data-device-manager.c"
+        "lorie-wayland/xwayland.c"
+        "lorie-wayland/wayland-activity.c"
+        "lorie-wayland/main.c")
+target_include_directories(Xlorie PRIVATE ${inc} "libxcvt/include" "wayland/wayland/src" "${CMAKE_CURRENT_BINARY_DIR}")
 target_link_options(Xlorie PRIVATE "-Wl,--as-needed" "-Wl,--no-undefined" "-fvisibility=hidden")
-target_link_libraries(Xlorie "-Wl,--whole-archive" ${XSERVER_LIBS} "-Wl,--no-whole-archive" android mediandk log m z EGL GLESv2)
+target_link_libraries(Xlorie "-Wl,--whole-archive" ${XSERVER_LIBS} "-Wl,--no-whole-archive" wayland-server wayland-util ffi wayland-protocols wayland-protocols-generated android mediandk log m z EGL GLESv2)
 target_compile_options(Xlorie PRIVATE ${compile_options})
 target_apply_patch(Xlorie "${CMAKE_CURRENT_SOURCE_DIR}/xserver" "${CMAKE_CURRENT_SOURCE_DIR}/patches/xserver.patch")
 target_apply_patch(Xlorie "${CMAKE_CURRENT_SOURCE_DIR}/libepoxy" "${CMAKE_CURRENT_SOURCE_DIR}/patches/libepoxy.patch")
