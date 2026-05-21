@@ -1,8 +1,10 @@
 #include "renderer.h"
 #include "../../lorie/buffer.h"
+#include "protocols/linux-dmabuf.h"
 #include <pthread.h>
 #include <android/log.h>
 #include <stdlib.h>
+#include <string.h>
 #include <EGL/egl.h>
 #include <GLES2/gl2.h>
 
@@ -59,6 +61,10 @@ struct lorie_renderer {
     GLuint program;
     GLint u_texture, u_transform, a_position, a_texcoords;
     int first_commit;
+    int has_dmabuf_import;
+    void *egl_create_image_khr;
+    void *egl_destroy_image_khr;
+    void *gl_egl_image_target_texture2d_oes;
 };
 
 static GLuint compile_shader(GLenum type, const char *src) {
@@ -144,6 +150,20 @@ int lorie_renderer_init(struct lorie_renderer *r) {
         pthread_mutex_unlock(&r->egl_lock);
         return -1;
     }
+
+    /* Check for DMA-BUF import extension */
+    const char *extensions = eglQueryString(r->egl_display, EGL_EXTENSIONS);
+    if (extensions && strstr(extensions, "EGL_EXT_image_dma_buf_import")) {
+        r->has_dmabuf_import = 1;
+        r->egl_create_image_khr = (void*)eglGetProcAddress("eglCreateImageKHR");
+        r->egl_destroy_image_khr = (void*)eglGetProcAddress("eglDestroyImageKHR");
+        r->gl_egl_image_target_texture2d_oes = (void*)eglGetProcAddress("glEGLImageTargetTexture2DOES");
+        if (!r->egl_create_image_khr || !r->egl_destroy_image_khr ||
+            !r->gl_egl_image_target_texture2d_oes) {
+            r->has_dmabuf_import = 0;
+        }
+    }
+
     pthread_mutex_unlock(&r->egl_lock);
     return 0;
 }
@@ -171,6 +191,10 @@ void lorie_renderer_fini(struct lorie_renderer *r) {
         glDeleteProgram(r->program);
         r->program = 0;
     }
+    r->has_dmabuf_import = 0;
+    r->egl_create_image_khr = NULL;
+    r->egl_destroy_image_khr = NULL;
+    r->gl_egl_image_target_texture2d_oes = NULL;
     pthread_mutex_unlock(&r->egl_lock);
 }
 
@@ -280,6 +304,27 @@ const float *lorie_renderer_surface_get_transform(struct lorie_renderer *r,
     }
     pthread_mutex_unlock(&r->surfaces_lock);
     return result;
+}
+
+/* DMA-BUF import helpers */
+int lorie_renderer_has_dmabuf_import(struct lorie_renderer *r) {
+    return r ? r->has_dmabuf_import : 0;
+}
+
+void* lorie_renderer_egl_display(struct lorie_renderer *r) {
+    return r ? (void*)r->egl_display : NULL;
+}
+
+void* lorie_renderer_egl_create_image_khr(struct lorie_renderer *r) {
+    return r ? r->egl_create_image_khr : NULL;
+}
+
+void* lorie_renderer_egl_destroy_image_khr(struct lorie_renderer *r) {
+    return r ? r->egl_destroy_image_khr : NULL;
+}
+
+void* lorie_renderer_gl_egl_image_target_texture2d_oes(struct lorie_renderer *r) {
+    return r ? r->gl_egl_image_target_texture2d_oes : NULL;
 }
 
 static void get_output_size(struct lorie_surface *s, int32_t *out_w, int32_t *out_h) {
@@ -422,7 +467,14 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
                 LorieBuffer_attachToGL(lb);
                 LorieBuffer_bindTexture(lb);
             } else if (s && s->buffer_resource) {
-                /* Non-SHM buffer attached but not yet imported — draw placeholder */
+                /* DMA-BUF buffer path */
+                struct lorie_dmabuf_buffer *dmabuf =
+                    wl_resource_get_user_data(s->buffer_resource);
+                if (dmabuf && dmabuf->imported && dmabuf->texture_id) {
+                    glBindTexture(GL_TEXTURE_2D, dmabuf->texture_id);
+                } else {
+                    continue;
+                }
             } else {
                 continue;
             }

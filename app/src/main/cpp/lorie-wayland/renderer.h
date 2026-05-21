@@ -29,6 +29,13 @@ pixman_region32_t *lorie_renderer_surface_get_damage(struct lorie_renderer *r,
 const float *lorie_renderer_surface_get_transform(struct lorie_renderer *r,
                                                     struct lorie_surface *s);
 
+/* DMA-BUF import helpers */
+int lorie_renderer_has_dmabuf_import(struct lorie_renderer *r);
+void* lorie_renderer_egl_display(struct lorie_renderer *r);
+void* lorie_renderer_egl_create_image_khr(struct lorie_renderer *r);
+void* lorie_renderer_egl_destroy_image_khr(struct lorie_renderer *r);
+void* lorie_renderer_gl_egl_image_target_texture2d_oes(struct lorie_renderer *r);
+
 extern atomic_int lorie_renderer_filtering;
 
-#endif
+#endif /* LORIE_RENDERER_H */
