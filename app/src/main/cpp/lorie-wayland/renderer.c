@@ -42,6 +42,7 @@ struct renderer_surface {
     struct wl_list link;
     struct lorie_surface *surface;
     int z_index;
+    pixman_region32_t accumulated_damage;
 };
 
 struct lorie_renderer {
@@ -55,6 +56,7 @@ struct lorie_renderer {
     ANativeWindow *current_window;
     GLuint program;
     GLint u_texture, a_position, a_texcoords;
+    int first_commit;
 };
 
 static GLuint compile_shader(GLenum type, const char *src) {
@@ -91,6 +93,7 @@ struct lorie_renderer *lorie_renderer_create(void) {
     r->egl_display = EGL_NO_DISPLAY;
     r->egl_context = EGL_NO_CONTEXT;
     r->egl_surface = EGL_NO_SURFACE;
+    r->first_commit = 1;
     return r;
 }
 
@@ -208,6 +211,7 @@ void lorie_renderer_add_surface(struct lorie_renderer *r, struct lorie_surface *
     if (rs) {
         rs->surface = s;
         rs->z_index = 0;
+        pixman_region32_init(&rs->accumulated_damage);
         wl_list_insert(r->surfaces.prev, &rs->link);
     }
     pthread_mutex_unlock(&r->surfaces_lock);
@@ -219,6 +223,7 @@ void lorie_renderer_remove_surface(struct lorie_renderer *r, struct lorie_surfac
     wl_list_for_each_safe(rs, tmp, &r->surfaces, link) {
         if (rs->surface == s) {
             wl_list_remove(&rs->link);
+            pixman_region32_fini(&rs->accumulated_damage);
             free(rs);
             break;
         }
@@ -228,7 +233,34 @@ void lorie_renderer_remove_surface(struct lorie_renderer *r, struct lorie_surfac
 
 void lorie_renderer_damage_surface(struct lorie_renderer *r, struct lorie_surface *s,
                                     int32_t x, int32_t y, int32_t w, int32_t h) {
-    (void)r; (void)s; (void)x; (void)y; (void)w; (void)h;
+    if (!r || !s || w <= 0 || h <= 0) return;
+    pthread_mutex_lock(&r->surfaces_lock);
+    struct renderer_surface *rs;
+    wl_list_for_each(rs, &r->surfaces, link) {
+        if (rs->surface == s) {
+            pixman_region32_union_rect(&rs->accumulated_damage,
+                                       &rs->accumulated_damage,
+                                       x, y, w, h);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&r->surfaces_lock);
+}
+
+pixman_region32_t *lorie_renderer_surface_get_damage(struct lorie_renderer *r,
+                                                       struct lorie_surface *s) {
+    if (!r || !s) return NULL;
+    pixman_region32_t *result = NULL;
+    pthread_mutex_lock(&r->surfaces_lock);
+    struct renderer_surface *rs;
+    wl_list_for_each(rs, &r->surfaces, link) {
+        if (rs->surface == s) {
+            result = &rs->accumulated_damage;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&r->surfaces_lock);
+    return result;
 }
 
 static int cmp_z(const void *a, const void *b) {
@@ -271,8 +303,11 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
     }
     eglMakeCurrent(r->egl_display, r->egl_surface, r->egl_surface, r->egl_context);
 
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
+    if (r->first_commit) {
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT);
+        r->first_commit = 0;
+    }
 
     if (r->program) {
         glUseProgram(r->program);
@@ -286,16 +321,27 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
         glActiveTexture(GL_TEXTURE0);
 
         for (int j = 0; j < count; j++) {
-            struct lorie_surface *s = sorted[j]->surface;
+            struct renderer_surface *rs = sorted[j];
+            struct lorie_surface *s = rs->surface;
+            if (!pixman_region32_not_empty(&rs->accumulated_damage)) {
+                continue;
+            }
             if (s && s->buffer) {
                 LorieBuffer *lb = (LorieBuffer*)s->buffer;
                 LorieBuffer_attachToGL(lb);
                 LorieBuffer_bindTexture(lb);
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             } else if (s && s->buffer_resource) {
                 /* Non-SHM buffer attached but not yet imported — draw placeholder */
-                glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            } else {
+                continue;
             }
+            pixman_box32_t *bbox = pixman_region32_extents(&rs->accumulated_damage);
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(bbox->x1, bbox->y1,
+                      bbox->x2 - bbox->x1, bbox->y2 - bbox->y1);
+            glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+            glDisable(GL_SCISSOR_TEST);
+            pixman_region32_clear(&rs->accumulated_damage);
         }
 
         glDisableVertexAttribArray(r->a_position);
