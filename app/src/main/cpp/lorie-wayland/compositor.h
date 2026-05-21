@@ -31,6 +31,7 @@ struct lorie_compositor {
     int running;
     pthread_t event_loop_thread;
     struct lorie_input *input;
+    struct lorie_renderer *renderer;
 };
 
 struct lorie_compositor *lorie_compositor_create(void);

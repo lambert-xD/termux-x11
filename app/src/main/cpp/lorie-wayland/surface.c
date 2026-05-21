@@ -1,6 +1,7 @@
 /* Lorie Wayland Compositor — Surface, Region, Subcompositor */
 
 #include "compositor.h"
+#include "renderer.h"
 #include "../../lorie/buffer.h"
 #include <wayland-server-protocol.h>
 #include <stdlib.h>
@@ -34,6 +35,9 @@ static void surface_damage(struct wl_client *client,
                            int32_t width, int32_t height) {
     struct lorie_surface *s = wl_resource_get_user_data(resource);
     pixman_region32_union_rect(&s->damage, &s->damage, x, y, width, height);
+    if (s->compositor && s->compositor->renderer) {
+        lorie_renderer_damage_surface(s->compositor->renderer, s, x, y, width, height);
+    }
     (void)client;
 }
 
@@ -108,6 +112,11 @@ static void surface_commit(struct wl_client *client,
             }
         }
     }
+    if (s->compositor && s->compositor->renderer && s->width > 0 && s->height > 0) {
+        lorie_renderer_damage_surface(s->compositor->renderer, s,
+                                       0, 0, s->width, s->height);
+    }
+
     struct lorie_frame_callback *cb, *tmp;
     wl_list_for_each_safe(cb, tmp, &s->frame_callbacks, link) {
         wl_callback_send_done(cb->resource, 0);

@@ -163,6 +163,7 @@ Java_com_termux_x11_WaylandEntryPoint_start(JNIEnv *env, jclass clazz,
     if (!g_compositor) return JNI_FALSE;
     g_renderer = lorie_renderer_create();
     if (!g_renderer || lorie_renderer_init(g_renderer) != 0) goto fail;
+    g_compositor->renderer = g_renderer;
     if (lorie_compositor_start(g_compositor) != 0) goto fail;
     return JNI_TRUE;
 fail:
@@ -180,6 +181,7 @@ JNIEXPORT void JNICALL
 Java_com_termux_x11_WaylandEntryPoint_stop(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
     if (g_compositor) {
+        g_compositor->renderer = NULL;
         lorie_compositor_stop(g_compositor);
         lorie_compositor_destroy(g_compositor);
         g_compositor = NULL;
