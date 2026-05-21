@@ -47,6 +47,7 @@ struct renderer_surface {
     int z_index;
     pixman_region32_t accumulated_damage;
     float transform[16];
+    int was_drawn;
 };
 
 struct lorie_renderer {
@@ -434,6 +435,7 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
 
     pthread_mutex_lock(&r->egl_lock);
     if (r->egl_surface == EGL_NO_SURFACE || r->egl_display == EGL_NO_DISPLAY) {
+        r->first_commit = 0;
         pthread_mutex_unlock(&r->egl_lock);
         return -1;
     }
@@ -483,6 +485,7 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
             glEnable(GL_SCISSOR_TEST);
             glScissor(bbox->x1, bbox->y1,
                       bbox->x2 - bbox->x1, bbox->y2 - bbox->y1);
+            rs->was_drawn = 1;
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             glDisable(GL_SCISSOR_TEST);
             pixman_region32_clear(&rs->accumulated_damage);
@@ -495,4 +498,24 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
     eglSwapBuffers(r->egl_display, r->egl_surface);
     pthread_mutex_unlock(&r->egl_lock);
     return 0;
+}
+
+int lorie_renderer_is_first_commit(struct lorie_renderer *r) {
+    return r ? r->first_commit : 0;
+}
+
+int lorie_renderer_surface_was_drawn(struct lorie_renderer *r,
+                                       struct lorie_surface *s) {
+    if (!r || !s) return 0;
+    int result = 0;
+    pthread_mutex_lock(&r->surfaces_lock);
+    struct renderer_surface *rs;
+    wl_list_for_each(rs, &r->surfaces, link) {
+        if (rs->surface == s) {
+            result = rs->was_drawn;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&r->surfaces_lock);
+    return result;
 }

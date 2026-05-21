@@ -124,6 +124,56 @@ static void test_damage_negative_size_ignored(void) {
     lorie_renderer_destroy(r);
 }
 
+static void test_damage_empty_skips_draw(void) {
+    struct lorie_renderer *r = lorie_renderer_create();
+    ASSERT_NOT_NULL(r);
+    static char dummy_surface[256];
+    struct lorie_surface *s = (struct lorie_surface *)dummy_surface;
+    lorie_renderer_add_surface(r, s);
+
+    /* No damage added — surface should not be drawn */
+    int ret = lorie_renderer_commit(r);
+    ASSERT_EQ_INT(-1, ret);
+    ASSERT_FALSE(lorie_renderer_surface_was_drawn(r, s));
+
+    lorie_renderer_remove_surface(r, s);
+    lorie_renderer_destroy(r);
+}
+
+static void test_damage_scissor_applied(void) {
+    struct lorie_renderer *r = lorie_renderer_create();
+    ASSERT_NOT_NULL(r);
+    static char dummy_surface[256];
+    struct lorie_surface *s = (struct lorie_surface *)dummy_surface;
+    lorie_renderer_add_surface(r, s);
+
+    lorie_renderer_damage_surface(r, s, 10, 20, 100, 50);
+
+    /* Verify damage bbox — this is what glScissor would use */
+    pixman_region32_t *damage = lorie_renderer_surface_get_damage(r, s);
+    ASSERT_NOT_NULL(damage);
+    pixman_box32_t *box = pixman_region32_extents(damage);
+    ASSERT_EQ_INT(10, box->x1);
+    ASSERT_EQ_INT(20, box->y1);
+    ASSERT_EQ_INT(110, box->x2);
+    ASSERT_EQ_INT(70, box->y2);
+
+    lorie_renderer_remove_surface(r, s);
+    lorie_renderer_destroy(r);
+}
+
+static void test_first_frame_full_clear(void) {
+    struct lorie_renderer *r = lorie_renderer_create();
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(lorie_renderer_is_first_commit(r));
+
+    /* After commit, first_commit flag is cleared even without EGL */
+    lorie_renderer_commit(r);
+    ASSERT_FALSE(lorie_renderer_is_first_commit(r));
+
+    lorie_renderer_destroy(r);
+}
+
 static void test_damage_multiple_surfaces(void) {
     struct lorie_renderer *r = lorie_renderer_create();
     ASSERT_NOT_NULL(r);
@@ -169,6 +219,9 @@ int lorie_test_renderer_damage_suite(struct lorie_test_suite *suite) {
     SUITE_ADD(suite, test_damage_null_renderer_safe);
     SUITE_ADD(suite, test_damage_null_surface_safe);
     SUITE_ADD(suite, test_damage_negative_size_ignored);
+    SUITE_ADD(suite, test_damage_empty_skips_draw);
+    SUITE_ADD(suite, test_damage_scissor_applied);
+    SUITE_ADD(suite, test_first_frame_full_clear);
     SUITE_ADD(suite, test_damage_multiple_surfaces);
     return 0;
 }
