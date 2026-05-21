@@ -75,7 +75,7 @@ static void data_offer_accept(struct wl_client *c, struct wl_resource *r, uint32
 
 static void data_offer_receive(struct wl_client *client, struct wl_resource *resource, const char *mime_type, int32_t fd) {
     struct lorie_data_offer *offer = wl_resource_get_user_data(resource);
-    if (offer && offer->source) {
+    if (offer && offer->source && lorie_clipboard_mime_type_supported(mime_type)) {
         wl_data_source_send_send(offer->source->resource, mime_type, fd);
     }
     close(fd);
