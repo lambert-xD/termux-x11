@@ -72,12 +72,11 @@ JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_sendTouchEvent(JNIEn
 JNIEXPORT jboolean JNICALL Java_com_termux_x11_LorieWaylandView_sendKeyEvent(JNIEnv*, jobject, jint, jint, jboolean);
 JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_sendTextEvent(JNIEnv*, jobject, jbyteArray);
 JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_sendClipboardEvent(JNIEnv*, jobject, jbyteArray);
-JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_setClipboardText(JNIEnv*, jobject, jbyteArray);
 
 /* Exported helpers for unit tests */
 int lorie_clipboard_validate_size(uint32_t count) { return count <= MAX_CLIPBOARD_SIZE; }
 int lorie_keycode_valid(int key_code) { return key_code >= 0 && key_code < 304; }
-const int lorie_wayland_native_method_count = 7;
+const int lorie_wayland_native_method_count = 6;
 
 JNIEXPORT void JNICALL
 Java_com_termux_x11_LorieWaylandView_nativeInit(JNIEnv *env, jclass clazz) {
@@ -94,8 +93,6 @@ Java_com_termux_x11_LorieWaylandView_nativeInit(JNIEnv *env, jclass clazz) {
          (void*)&Java_com_termux_x11_LorieWaylandView_sendTextEvent},
         {"sendClipboardEvent", "([B)V",
          (void*)&Java_com_termux_x11_LorieWaylandView_sendClipboardEvent},
-        {"setClipboardText", "([B)V",
-         (void*)&Java_com_termux_x11_LorieWaylandView_setClipboardText},
     };
     if ((*env)->RegisterNatives(env, clazz, methods,
                                 sizeof(methods)/sizeof(methods[0])) != 0) {
@@ -192,22 +189,7 @@ Java_com_termux_x11_LorieWaylandView_sendClipboardEvent(JNIEnv *env, jobject thi
     (*env)->ReleaseByteArrayElements(env, text, bytes, JNI_ABORT);
 }
 
-JNIEXPORT void JNICALL
-Java_com_termux_x11_LorieWaylandView_setClipboardText(JNIEnv *env, jobject thiz,
-                                                     jbyteArray text) {
-    (void)thiz;
-    if (!text) return;
-    jsize length = (*env)->GetArrayLength(env, text);
-    if (length < 0 || !lorie_clipboard_validate_size((uint32_t)length)) return;
 
-    jbyte *bytes = (*env)->GetByteArrayElements(env, text, NULL);
-    if (!bytes) return;
-
-    /* TODO: Set Android clipboard via ClipboardManager API */
-    LOGI("Wayland clipboard text (%zd bytes): %.*s", (size_t)length, length, (char*)bytes);
-
-    (*env)->ReleaseByteArrayElements(env, text, bytes, JNI_ABORT);
-}
 
 JNIEXPORT jboolean JNICALL
 Java_com_termux_x11_WaylandEntryPoint_start(JNIEnv *env, jclass clazz,
