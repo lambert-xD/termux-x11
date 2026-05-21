@@ -2,9 +2,7 @@
  * Lorie Wayland Compositor — Clipboard Wayland→Android forwarding
  *
  * PR #5a: Pipe-based fd passing for clipboard data transfer.
- * When a Wayland client sets the selection, we create a pipe,
- * ask the source to write data, and forward the result to Android
- * via a text callback (JNI in production, test hook in tests).
+ * PR #5b: Android→Wayland forwarding + loop prevention.
  */
 
 #include "compositor.h"
@@ -12,6 +10,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
+#include <time.h>
+#include <stdint.h>
+
+#define MAX_CLIPBOARD_SIZE (1024 * 1024)
+#define LOOP_PREVENTION_MS 500
 
 struct lorie_clipboard {
     struct lorie_compositor *compositor;
@@ -23,6 +26,11 @@ struct lorie_clipboard {
     void (*text_callback)(const char *text, size_t len, void *user_data);
     void *text_callback_user_data;
     pthread_mutex_t lock;
+    char *android_text;
+    size_t android_text_len;
+    enum lorie_clipboard_source last_source;
+    uint64_t last_timestamp_ms;
+    uint64_t sequence;
 };
 
 struct lorie_clipboard *lorie_clipboard_create(struct lorie_compositor *c) {
@@ -39,6 +47,12 @@ struct lorie_clipboard *lorie_clipboard_create(struct lorie_compositor *c) {
     }
 
     return cb;
+}
+
+static uint64_t current_time_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000 + (uint64_t)ts.tv_nsec / 1000000;
 }
 
 void lorie_clipboard_destroy(struct lorie_clipboard *cb) {
@@ -58,6 +72,10 @@ void lorie_clipboard_destroy(struct lorie_clipboard *cb) {
         pthread_join(cb->worker_thread, NULL);
         cb->worker_thread = 0;
     }
+
+    free(cb->android_text);
+    cb->android_text = NULL;
+    cb->android_text_len = 0;
 
     pthread_mutex_destroy(&cb->lock);
     free(cb);
@@ -103,6 +121,8 @@ static void *clipboard_worker(void *data) {
 
     if (lorie_clipboard_read_pipe(cb->read_fd, &text, &len) == 0 && text && len > 0) {
         pthread_mutex_lock(&cb->lock);
+        cb->last_source = CLIPBOARD_SOURCE_WAYLAND;
+        cb->last_timestamp_ms = current_time_ms();
         if (cb->text_callback) {
             cb->text_callback(text, len, cb->text_callback_user_data);
         }
@@ -188,4 +208,85 @@ int lorie_clipboard_mime_type_supported(const char *mime_type) {
     if (!mime_type) return 0;
     return (strcmp(mime_type, "text/plain") == 0 ||
             strcmp(mime_type, "text/plain;charset=utf-8") == 0);
+}
+
+/* --- Android → Wayland --- */
+
+void lorie_clipboard_send_android_text(struct lorie_clipboard *cb, const char *text, size_t len) {
+    if (!cb) return;
+    if (len > MAX_CLIPBOARD_SIZE) return;
+
+    pthread_mutex_lock(&cb->lock);
+
+    /* Loop prevention: ignore echo from Wayland within 500ms */
+    if (cb->last_source == CLIPBOARD_SOURCE_WAYLAND) {
+        uint64_t now = current_time_ms();
+        if (now - cb->last_timestamp_ms < LOOP_PREVENTION_MS) {
+            pthread_mutex_unlock(&cb->lock);
+            return;
+        }
+    }
+
+    free(cb->android_text);
+    cb->android_text = NULL;
+    cb->android_text_len = 0;
+
+    cb->android_text = calloc(len + 1, 1);
+    if (cb->android_text) {
+        if (len > 0 && text) {
+            memcpy(cb->android_text, text, len);
+        }
+        cb->android_text[len] = '\0';
+        cb->android_text_len = len;
+    }
+
+    cb->last_source = CLIPBOARD_SOURCE_ANDROID;
+    cb->last_timestamp_ms = current_time_ms();
+    cb->sequence++;
+
+    pthread_mutex_unlock(&cb->lock);
+
+    /* Notify Wayland clients */
+    if (cb->compositor) {
+        lorie_clipboard_send_android_selection(cb->compositor);
+    }
+}
+
+const char *lorie_clipboard_get_android_text(struct lorie_clipboard *cb, size_t *out_len) {
+    if (!cb || !out_len) return NULL;
+    pthread_mutex_lock(&cb->lock);
+    *out_len = cb->android_text_len;
+    const char *text = cb->android_text;
+    pthread_mutex_unlock(&cb->lock);
+    return text;
+}
+
+enum lorie_clipboard_source lorie_clipboard_get_last_source(struct lorie_clipboard *cb) {
+    if (!cb) return CLIPBOARD_SOURCE_NONE;
+    pthread_mutex_lock(&cb->lock);
+    enum lorie_clipboard_source src = cb->last_source;
+    pthread_mutex_unlock(&cb->lock);
+    return src;
+}
+
+uint64_t lorie_clipboard_get_timestamp(struct lorie_clipboard *cb) {
+    if (!cb) return 0;
+    pthread_mutex_lock(&cb->lock);
+    uint64_t ts = cb->last_timestamp_ms;
+    pthread_mutex_unlock(&cb->lock);
+    return ts;
+}
+
+void lorie_clipboard_set_last_source(struct lorie_clipboard *cb, enum lorie_clipboard_source src) {
+    if (!cb) return;
+    pthread_mutex_lock(&cb->lock);
+    cb->last_source = src;
+    pthread_mutex_unlock(&cb->lock);
+}
+
+void lorie_clipboard_set_timestamp(struct lorie_clipboard *cb, uint64_t ts) {
+    if (!cb) return;
+    pthread_mutex_lock(&cb->lock);
+    cb->last_timestamp_ms = ts;
+    pthread_mutex_unlock(&cb->lock);
 }

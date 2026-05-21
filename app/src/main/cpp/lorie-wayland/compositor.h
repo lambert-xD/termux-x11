@@ -29,6 +29,7 @@ struct lorie_compositor {
     struct wl_list outputs;
     struct wl_list surfaces;
     struct wl_list clients;
+    struct wl_list data_devices;
     pthread_mutex_t lock;
     ANativeWindow *native_window;
     int running;
@@ -48,6 +49,9 @@ struct wl_global *lorie_xdg_shell_create(struct wl_display *display);
 struct wl_global *lorie_linux_dmabuf_create(struct wl_display *display, struct lorie_compositor *compositor);
 struct wl_global *lorie_data_device_manager_create(struct wl_display *display, struct lorie_compositor *c);
 struct wl_global *lorie_viewporter_create(struct wl_display *display);
+
+/* Notify Wayland clients of Android clipboard changes */
+void lorie_clipboard_send_android_selection(struct lorie_compositor *c);
 
 /* Conditional global creation (called after renderer init) */
 void lorie_compositor_create_dmabuf_global(struct lorie_compositor *c);
@@ -115,6 +119,12 @@ struct lorie_shm_pool {
 struct lorie_shm_pool *lorie_shm_pool_create(int fd, int32_t size);
 void lorie_shm_pool_destroy(struct lorie_shm_pool *pool);
 
+enum lorie_clipboard_source {
+    CLIPBOARD_SOURCE_NONE = 0,
+    CLIPBOARD_SOURCE_ANDROID,
+    CLIPBOARD_SOURCE_WAYLAND,
+};
+
 /* Clipboard API — exposed for tests */
 struct lorie_clipboard *lorie_clipboard_create(struct lorie_compositor *c);
 void lorie_clipboard_destroy(struct lorie_clipboard *cb);
@@ -123,6 +133,14 @@ void lorie_clipboard_set_selection(struct lorie_clipboard *cb, struct wl_resourc
 void lorie_clipboard_set_text_callback(struct lorie_clipboard *cb,
     void (*cb_fn)(const char *text, size_t len, void *user_data), void *user_data);
 int lorie_clipboard_mime_type_supported(const char *mime_type);
+
+/* Android → Wayland clipboard */
+void lorie_clipboard_send_android_text(struct lorie_clipboard *cb, const char *text, size_t len);
+const char *lorie_clipboard_get_android_text(struct lorie_clipboard *cb, size_t *out_len);
+enum lorie_clipboard_source lorie_clipboard_get_last_source(struct lorie_clipboard *cb);
+uint64_t lorie_clipboard_get_timestamp(struct lorie_clipboard *cb);
+void lorie_clipboard_set_last_source(struct lorie_clipboard *cb, enum lorie_clipboard_source src);
+void lorie_clipboard_set_timestamp(struct lorie_clipboard *cb, uint64_t ts);
 
 /* Internal API — exposed for tests */
 struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,

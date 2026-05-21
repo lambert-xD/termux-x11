@@ -100,6 +100,7 @@ struct lorie_compositor *lorie_compositor_create(void) {
     wl_list_init(&c->outputs);
     wl_list_init(&c->surfaces);
     wl_list_init(&c->clients);
+    wl_list_init(&c->data_devices);
 
     if (pthread_mutex_init(&c->lock, NULL) != 0) {
         LOGE("Failed to init mutex");

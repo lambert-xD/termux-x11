@@ -179,12 +179,10 @@ Java_com_termux_x11_LorieWaylandView_sendClipboardEvent(JNIEnv *env, jobject thi
     if (length < 0 || !lorie_clipboard_validate_size((uint32_t)length)) return;
     jbyte *bytes = (*env)->GetByteArrayElements(env, text, NULL);
     if (!bytes) return;
-    char *clipboard = calloc((size_t)length + 1, 1);
-    if (clipboard) {
-        memcpy(clipboard, bytes, (size_t)length);
-        clipboard[length] = 0;
-        LOGI("Clipboard received (%zd bytes)", (size_t)length);
-        free(clipboard);
+    if (g_compositor && g_compositor->clipboard) {
+        lorie_clipboard_send_android_text(g_compositor->clipboard,
+                                          (const char *)bytes, (size_t)length);
+        LOGI("Clipboard forwarded to Wayland (%zd bytes)", (size_t)length);
     }
     (*env)->ReleaseByteArrayElements(env, text, bytes, JNI_ABORT);
 }
