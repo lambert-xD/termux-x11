@@ -35,6 +35,7 @@ set(LORIE_TEST_SOURCES
     test_renderer_damage.c
     test_transform.c
     test_viewporter.c
+    test_dmabuf.c
 )
 
 add_executable(lorie-wayland-tests ${LORIE_TEST_SOURCES})
