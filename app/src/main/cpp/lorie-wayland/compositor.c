@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <android/log.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
 #define LOG_TAG "LorieCompositor"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -16,6 +18,77 @@ static void subcompositor_bind(struct wl_client *client, void *data,
                                uint32_t version, uint32_t id);
 static void shm_bind(struct wl_client *client, void *data,
                      uint32_t version, uint32_t id);
+static void output_bind(struct wl_client *client, void *data,
+                        uint32_t version, uint32_t id) {
+    struct lorie_output *output = data;
+    struct wl_resource *resource =
+        wl_resource_create(client, &wl_output_interface, (int)version, id);
+    if (!resource) {
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(resource, NULL, output, NULL);
+    wl_output_send_geometry(resource, 0, 0, output->width, output->height, 0,
+                            "Unknown", "Unknown", 0);
+    wl_output_send_mode(resource, 0, output->width, output->height, output->refresh);
+    wl_output_send_scale(resource, output->scale);
+    wl_output_send_done(resource);
+}
+
+/* --- SHM pool helpers (exposed for tests) --- */
+struct lorie_shm_pool *lorie_shm_pool_create(int fd, int32_t size) {
+    void *data = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
+    if (data == MAP_FAILED) {
+        return NULL;
+    }
+    struct lorie_shm_pool *pool = calloc(1, sizeof(*pool));
+    if (!pool) {
+        munmap(data, size);
+        return NULL;
+    }
+    pool->data = data;
+    pool->size = size;
+    return pool;
+}
+
+void lorie_shm_pool_destroy(struct lorie_shm_pool *pool) {
+    if (!pool) return;
+    if (pool->data && pool->data != MAP_FAILED)
+        munmap(pool->data, pool->size);
+    free(pool);
+}
+
+/* --- wl_shm_pool implementation --- */
+
+static void shm_pool_destroy(struct wl_client *client, struct wl_resource *resource) {
+    wl_resource_destroy(resource);
+    (void)client;
+}
+
+static void shm_pool_create_buffer(struct wl_client *client, struct wl_resource *resource,
+                                   uint32_t id, int32_t offset, int32_t width,
+                                   int32_t height, int32_t stride, uint32_t format) {
+    /* Deferred to PR #3: buffer creation from shm pool */
+    (void)client; (void)resource; (void)id; (void)offset;
+    (void)width; (void)height; (void)stride; (void)format;
+}
+
+static void shm_pool_resize(struct wl_client *client, struct wl_resource *resource,
+                            int32_t size) {
+    /* Deferred to PR #3: pool resize */
+    (void)client; (void)resource; (void)size;
+}
+
+static const struct wl_shm_pool_interface shm_pool_impl = {
+    shm_pool_create_buffer,
+    shm_pool_destroy,
+    shm_pool_resize,
+};
+
+static void shm_pool_handle_resource_destroy(struct wl_resource *resource) {
+    struct lorie_shm_pool *pool = wl_resource_get_user_data(resource);
+    lorie_shm_pool_destroy(pool);
+}
 
 struct lorie_compositor *lorie_compositor_create(void) {
     struct lorie_compositor *c = calloc(1, sizeof(*c));
@@ -265,7 +338,13 @@ static void compositor_bind(struct wl_client *client, void *data,
     wl_resource_set_implementation(resource, &compositor_impl, c, NULL);
 }
 
+static void subcompositor_destroy(struct wl_client *client, struct wl_resource *resource) {
+    wl_resource_destroy(resource);
+    (void)client;
+}
+
 static const struct wl_subcompositor_interface subcompositor_impl = {
+    subcompositor_destroy,
     subcompositor_get_subsurface,
 };
 
@@ -287,9 +366,21 @@ static void subcompositor_bind(struct wl_client *client, void *data,
 static void shm_create_pool(struct wl_client *client,
                             struct wl_resource *resource,
                             uint32_t id, int32_t fd, int32_t size) {
-    /* Placeholder: shm pool creation deferred to PR #3 */
-    (void)client; (void)resource; (void)id;
-    (void)fd; (void)size;
+    struct lorie_shm_pool *pool = lorie_shm_pool_create(fd, size);
+    if (!pool) {
+        wl_resource_post_error(resource, WL_SHM_ERROR_INVALID_FD, "mmap failed");
+        close(fd);
+        return;
+    }
+    close(fd);
+
+    struct wl_resource *pool_resource = wl_resource_create(client, &wl_shm_pool_interface, 1, id);
+    if (!pool_resource) {
+        lorie_shm_pool_destroy(pool);
+        wl_client_post_no_memory(client);
+        return;
+    }
+    wl_resource_set_implementation(pool_resource, &shm_pool_impl, pool, shm_pool_handle_resource_destroy);
 }
 
 static const struct wl_shm_interface shm_impl = {

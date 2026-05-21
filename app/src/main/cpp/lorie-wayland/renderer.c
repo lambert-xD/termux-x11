@@ -3,74 +3,8 @@
 #include <pthread.h>
 #include <android/log.h>
 #include <stdlib.h>
-
-/* === NDK stubs for standalone compilation === */
-typedef void *EGLDisplay; typedef void *EGLContext;
-typedef void *EGLSurface; typedef void *EGLConfig;
-typedef unsigned int EGLBoolean; typedef int EGLint;
-typedef unsigned int GLenum; typedef unsigned int GLuint;
-typedef int GLint; typedef unsigned char GLboolean;
-typedef float GLfloat; typedef int GLsizei;
-typedef unsigned int GLbitfield;
-#define EGL_NO_DISPLAY ((EGLDisplay)0)
-#define EGL_NO_CONTEXT ((EGLContext)0)
-#define EGL_NO_SURFACE ((EGLSurface)0)
-#define EGL_FALSE 0
-#define EGL_NONE 0x3038
-#define EGL_SURFACE_TYPE 0x3025
-#define EGL_WINDOW_BIT 0x0004
-#define EGL_RENDERABLE_TYPE 0x3040
-#define EGL_OPENGL_ES2_BIT 0x0004
-#define EGL_RED_SIZE 0x3024
-#define EGL_GREEN_SIZE 0x3023
-#define EGL_BLUE_SIZE 0x3022
-#define EGL_ALPHA_SIZE 0x3021
-#define EGL_CONTEXT_CLIENT_VERSION 0x3098
-#define GL_VERTEX_SHADER 0x8B31
-#define GL_FRAGMENT_SHADER 0x8B30
-#define GL_COMPILE_STATUS 0x8B81
-#define GL_LINK_STATUS 0x8B82
-#define GL_TEXTURE0 0x84C0
-#define GL_TRIANGLE_STRIP 0x0005
-#define GL_FLOAT 0x1406
-#define GL_COLOR_BUFFER_BIT 0x00004000
-#define GL_NEAREST 0x2600
-#define GL_TRUE 1
-#define GL_FALSE 0
-
-extern EGLDisplay eglGetDisplay(void*);
-extern EGLBoolean eglInitialize(EGLDisplay, EGLint*, EGLint*);
-extern EGLBoolean eglTerminate(EGLDisplay);
-extern EGLBoolean eglChooseConfig(EGLDisplay, const EGLint*, EGLConfig*, EGLint, EGLint*);
-extern EGLContext eglCreateContext(EGLDisplay, EGLConfig, EGLContext, const EGLint*);
-extern EGLBoolean eglDestroyContext(EGLDisplay, EGLContext);
-extern EGLSurface eglCreateWindowSurface(EGLDisplay, EGLConfig, void*, const EGLint*);
-extern EGLBoolean eglDestroySurface(EGLDisplay, EGLSurface);
-extern EGLBoolean eglMakeCurrent(EGLDisplay, EGLSurface, EGLSurface, EGLContext);
-extern EGLBoolean eglSwapBuffers(EGLDisplay, EGLSurface);
-extern EGLBoolean eglSwapInterval(EGLDisplay, EGLint);
-
-extern GLuint glCreateShader(GLenum);
-extern void glShaderSource(GLuint, GLsizei, const char*const*, const GLint*);
-extern void glCompileShader(GLuint);
-extern void glGetShaderiv(GLuint, GLenum, GLint*);
-extern void glDeleteShader(GLuint);
-extern GLuint glCreateProgram(void);
-extern void glAttachShader(GLuint, GLuint);
-extern void glLinkProgram(GLuint);
-extern void glGetProgramiv(GLuint, GLenum, GLint*);
-extern void glDeleteProgram(GLuint);
-extern void glUseProgram(GLuint);
-extern GLint glGetUniformLocation(GLuint, const char*);
-extern GLint glGetAttribLocation(GLuint, const char*);
-extern void glUniform1i(GLint, GLint);
-extern void glVertexAttribPointer(GLuint, GLint, GLenum, GLboolean, GLsizei, const void*);
-extern void glEnableVertexAttribArray(GLuint);
-extern void glDisableVertexAttribArray(GLuint);
-extern void glActiveTexture(GLenum);
-extern void glDrawArrays(GLenum, GLint, GLsizei);
-extern void glClearColor(GLfloat, GLfloat, GLfloat, GLfloat);
-extern void glClear(GLbitfield);
+#include <EGL/egl.h>
+#include <GLES2/gl2.h>
 
 #include "compositor.h"
 

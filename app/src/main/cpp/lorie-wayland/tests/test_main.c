@@ -10,6 +10,7 @@
 /* Forward declarations — each test_*.c file provides one suite init. */
 extern int lorie_test_framework_suite(struct lorie_test_suite* suite);
 extern int lorie_test_build_suite(struct lorie_test_suite* suite);
+extern int lorie_test_ndk_build_suite(struct lorie_test_suite* suite);
 extern int lorie_test_compositor_suite(struct lorie_test_suite* suite);
 extern int lorie_test_surface_suite(struct lorie_test_suite* suite);
 extern int lorie_test_renderer_suite(struct lorie_test_suite* suite);
@@ -26,6 +27,9 @@ int main(int argc, char** argv) {
 
     struct lorie_test_suite build_suite;
     lorie_test_build_suite(&build_suite);
+
+    struct lorie_test_suite ndk_build_suite;
+    lorie_test_ndk_build_suite(&ndk_build_suite);
 
     struct lorie_test_suite compositor_suite;
     lorie_test_compositor_suite(&compositor_suite);
@@ -57,6 +61,7 @@ int main(int argc, char** argv) {
     struct lorie_test_suite* suites[] = {
         &framework_suite,
         &build_suite,
+        &ndk_build_suite,
         &compositor_suite,
         &surface_suite,
         &renderer_suite,

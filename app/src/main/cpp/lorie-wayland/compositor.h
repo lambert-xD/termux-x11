@@ -90,6 +90,15 @@ struct lorie_region {
     pixman_region32_t region;
 };
 
+/* SHM pool (exposed for tests) */
+struct lorie_shm_pool {
+    void *data;
+    int32_t size;
+};
+
+struct lorie_shm_pool *lorie_shm_pool_create(int fd, int32_t size);
+void lorie_shm_pool_destroy(struct lorie_shm_pool *pool);
+
 /* Internal API — exposed for tests */
 struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,
                                                      struct wl_client *client,
