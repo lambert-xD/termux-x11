@@ -41,3 +41,14 @@ github.properties
 app/.cxx/*
 # Local Pi runtime state
 .atl/
+
+# Build artifacts
+app/src/main/cpp/build-test/
+app/src/main/cpp/.pi-lens/
+app/src/main/cpp/lorie-wayland/tests/CMakeCache.txt
+app/src/main/cpp/lorie-wayland/tests/CMakeFiles/
+app/src/main/cpp/lorie-wayland/tests/Makefile
+app/src/main/cpp/lorie-wayland/tests/CTestTestfile.cmake
+app/src/main/cpp/lorie-wayland/tests/cmake_install.cmake
+app/src/main/cpp/lorie-wayland/tests/Testing/
+app/src/main/cpp/lorie-wayland/tests/.pi-lens/
