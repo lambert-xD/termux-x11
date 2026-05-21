@@ -62,14 +62,19 @@ foreach(PROTOCOL ${STABLE_PROTOCOLS})
     endif()
 endforeach()
 
+# Ensure headers are generated before any compilation that includes them
+add_custom_target(wayland-protocols-headers DEPENDS ${WAYLAND_PROTOCOL_HEADERS})
+
 # Interface library for consumers that only need include paths
 add_library(wayland-protocols INTERFACE)
 target_include_directories(wayland-protocols INTERFACE
     "${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols"
     "${WAYLAND_PROTOCOLS_DIR}/include")
+add_dependencies(wayland-protocols wayland-protocols-headers)
 
 # Object library with generated implementation sources
 add_library(wayland-protocols-generated OBJECT ${WAYLAND_PROTOCOL_SOURCES})
+add_dependencies(wayland-protocols-generated wayland-protocols-headers)
 target_include_directories(wayland-protocols-generated PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}/wayland-protocols"
     "${WAYLAND_SRC}"

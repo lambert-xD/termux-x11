@@ -43,9 +43,16 @@ add_custom_command(
     DEPENDS ${WAYLAND_CORE_XML}
     COMMENT "Generating wayland-client-protocol.h"
     VERBATIM)
+add_custom_command(
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/wayland-server-protocol.c"
+    COMMAND ${WAYLAND_SCANNER} private-code ${WAYLAND_CORE_XML} ${CMAKE_CURRENT_BINARY_DIR}/wayland-server-protocol.c
+    DEPENDS ${WAYLAND_CORE_XML}
+    COMMENT "Generating wayland-server-protocol.c"
+    VERBATIM)
 add_custom_target(wayland-core-protocol-headers DEPENDS
     "${CMAKE_CURRENT_BINARY_DIR}/wayland-server-protocol.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/wayland-client-protocol.h")
+    "${CMAKE_CURRENT_BINARY_DIR}/wayland-client-protocol.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/wayland-server-protocol.c")
 
 # wayland-util (static)
 add_library(wayland-util STATIC "${WAYLAND_SRC}/wayland-util.c")
@@ -65,11 +72,12 @@ add_library(wayland-server STATIC
     "${WAYLAND_SRC}/wayland-shm.c"
     "${WAYLAND_SRC}/event-loop.c"
     "${WAYLAND_SRC}/connection.c"
+    "${CMAKE_CURRENT_BINARY_DIR}/wayland-server-protocol.c"
     $<TARGET_OBJECTS:wayland-os>)
 add_dependencies(wayland-server wayland-core-protocol-headers)
 target_include_directories(wayland-server PUBLIC "${WAYLAND_SRC}" "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_options(wayland-server PRIVATE -fvisibility=hidden -include${CMAKE_CURRENT_BINARY_DIR}/wayland-config.h -DWL_HIDE_DEPRECATED)
-target_link_libraries(wayland-server PUBLIC wayland-util)
+target_link_libraries(wayland-server PUBLIC wayland-util ffi)
 
 # wayland-client (static)
 add_library(wayland-client STATIC
@@ -78,33 +86,6 @@ add_library(wayland-client STATIC
 add_dependencies(wayland-client wayland-core-protocol-headers)
 target_include_directories(wayland-client PUBLIC "${WAYLAND_SRC}" "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_options(wayland-client PRIVATE -fvisibility=hidden -include${CMAKE_CURRENT_BINARY_DIR}/wayland-config.h -DWL_HIDE_DEPRECATED)
-target_link_libraries(wayland-client PUBLIC wayland-util)
+target_link_libraries(wayland-client PUBLIC wayland-util ffi)
 
-# wayland-util (static)
-add_library(wayland-util STATIC "${WAYLAND_SRC}/wayland-util.c")
-target_include_directories(wayland-util PRIVATE "${WAYLAND_SRC}" "${CMAKE_CURRENT_BINARY_DIR}")
-target_compile_options(wayland-util PRIVATE -fvisibility=hidden -include${CMAKE_CURRENT_BINARY_DIR}/wayland-config.h)
 
-# wayland-os (object library for shared OS code)
-add_library(wayland-os OBJECT "${WAYLAND_SRC}/wayland-os.c")
-target_include_directories(wayland-os PRIVATE "${WAYLAND_SRC}" "${CMAKE_CURRENT_BINARY_DIR}")
-target_compile_options(wayland-os PRIVATE -fvisibility=hidden -include${CMAKE_CURRENT_BINARY_DIR}/wayland-config.h)
-
-# wayland-server (static)
-add_library(wayland-server STATIC
-    "${WAYLAND_SRC}/wayland-server.c"
-    "${WAYLAND_SRC}/wayland-shm.c"
-    "${WAYLAND_SRC}/event-loop.c"
-    "${WAYLAND_SRC}/connection.c"
-    $<TARGET_OBJECTS:wayland-os>)
-target_include_directories(wayland-server PUBLIC "${WAYLAND_SRC}" "${CMAKE_CURRENT_BINARY_DIR}")
-target_compile_options(wayland-server PRIVATE -fvisibility=hidden -include${CMAKE_CURRENT_BINARY_DIR}/wayland-config.h -DWL_HIDE_DEPRECATED)
-target_link_libraries(wayland-server PUBLIC wayland-util)
-
-# wayland-client (static)
-add_library(wayland-client STATIC
-    "${WAYLAND_SRC}/wayland-client.c"
-    $<TARGET_OBJECTS:wayland-os>)
-target_include_directories(wayland-client PUBLIC "${WAYLAND_SRC}" "${CMAKE_CURRENT_BINARY_DIR}")
-target_compile_options(wayland-client PRIVATE -fvisibility=hidden -include${CMAKE_CURRENT_BINARY_DIR}/wayland-config.h -DWL_HIDE_DEPRECATED)
-target_link_libraries(wayland-client PUBLIC wayland-util)
