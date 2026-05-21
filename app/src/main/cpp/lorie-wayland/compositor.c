@@ -169,6 +169,12 @@ struct lorie_compositor *lorie_compositor_create(void) {
         goto fail_globals;
     }
 
+    c->viewporter_global = lorie_viewporter_create(c->display);
+    if (!c->viewporter_global) {
+        LOGE("Failed to create viewporter global");
+        goto fail_globals;
+    }
+
     /* wl_output global is created when an output is added */
     c->output_global = NULL;
 
@@ -203,6 +209,8 @@ void lorie_compositor_destroy(struct lorie_compositor *c) {
 
     if (c->output_global)
         wl_global_destroy(c->output_global);
+    if (c->viewporter_global)
+        wl_global_destroy(c->viewporter_global);
     if (c->data_device_manager_global)
         wl_global_destroy(c->data_device_manager_global);
     if (c->linux_dmabuf_global)
