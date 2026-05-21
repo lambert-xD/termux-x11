@@ -183,3 +183,9 @@ void lorie_clipboard_set_text_callback(struct lorie_clipboard *cb,
     cb->text_callback_user_data = user_data;
     pthread_mutex_unlock(&cb->lock);
 }
+
+int lorie_clipboard_mime_type_supported(const char *mime_type) {
+    if (!mime_type) return 0;
+    return (strcmp(mime_type, "text/plain") == 0 ||
+            strcmp(mime_type, "text/plain;charset=utf-8") == 0);
+}

@@ -122,6 +122,7 @@ int lorie_clipboard_read_pipe(int read_fd, char **out_text, size_t *out_len);
 void lorie_clipboard_set_selection(struct lorie_clipboard *cb, struct wl_resource *source_resource);
 void lorie_clipboard_set_text_callback(struct lorie_clipboard *cb,
     void (*cb_fn)(const char *text, size_t len, void *user_data), void *user_data);
+int lorie_clipboard_mime_type_supported(const char *mime_type);
 
 /* Internal API — exposed for tests */
 struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,
