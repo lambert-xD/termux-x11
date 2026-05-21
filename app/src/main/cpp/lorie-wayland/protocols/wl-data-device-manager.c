@@ -50,8 +50,8 @@ static void data_source_destroy(struct wl_client *client, struct wl_resource *re
 
 static const struct wl_data_source_interface data_source_impl = {
     data_source_offer,
-    data_source_set_actions,
     data_source_destroy,
+    data_source_set_actions,
 };
 
 static void data_source_handle_destroy(struct wl_resource *resource) {
@@ -177,9 +177,9 @@ static void manager_destroy(struct wl_client *client, struct wl_resource *resour
 }
 
 static const struct wl_data_device_manager_interface manager_impl = {
-    manager_destroy,
     manager_create_data_source,
     manager_get_data_device,
+    manager_destroy,
 };
 
 static void manager_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id) {

@@ -44,7 +44,7 @@ static void xdg_surface_set_window_geometry(struct wl_client *c, struct wl_resou
 static void xdg_surface_get_toplevel(struct wl_client *client, struct wl_resource *resource, uint32_t id) {
     struct lorie_xdg_surface *xdg_surf = wl_resource_get_user_data(resource);
     if (xdg_surf->role) {
-        wl_resource_post_error(resource, XDG_SURFACE_ERROR_ROLE, "surface already has role");
+        wl_resource_post_error(resource, XDG_WM_BASE_ERROR_ROLE, "surface already has role");
         return;
     }
     struct lorie_xdg_toplevel *toplevel = calloc(1, sizeof(*toplevel));
@@ -62,7 +62,7 @@ static void xdg_surface_get_popup(struct wl_client *client, struct wl_resource *
                                   struct wl_resource *positioner_resource) {
     struct lorie_xdg_surface *xdg_surf = wl_resource_get_user_data(resource);
     if (xdg_surf->role) {
-        wl_resource_post_error(resource, XDG_SURFACE_ERROR_ROLE, "surface already has role");
+        wl_resource_post_error(resource, XDG_WM_BASE_ERROR_ROLE, "surface already has role");
         return;
     }
     if (!positioner_resource) {
@@ -78,10 +78,10 @@ static void xdg_surface_get_popup(struct wl_client *client, struct wl_resource *
 
 static const struct xdg_surface_interface xdg_surface_impl = {
     xdg_surface_destroy,
-    xdg_surface_ack_configure,
-    xdg_surface_set_window_geometry,
     xdg_surface_get_toplevel,
     xdg_surface_get_popup,
+    xdg_surface_set_window_geometry,
+    xdg_surface_ack_configure,
 };
 
 static void xdg_toplevel_destroy(struct wl_client *client, struct wl_resource *resource) {

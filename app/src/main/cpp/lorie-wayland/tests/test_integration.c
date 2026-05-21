@@ -5,6 +5,7 @@
 #include "lorie_test.h"
 #include "compositor.h"
 #include "renderer.h"
+#include "input.h"
 
 /* Declared in main.c */
 extern int lorie_wayland_main(void);

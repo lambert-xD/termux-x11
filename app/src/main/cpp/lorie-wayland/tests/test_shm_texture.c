@@ -6,6 +6,7 @@
 
 #include "lorie_test.h"
 #include "../compositor.h"
+#include "../renderer.h"
 
 static void test_surface_buffer_null_initially(void) {
     struct lorie_surface *s = lorie_surface_create_internal(NULL, NULL, 0);

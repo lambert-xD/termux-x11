@@ -111,7 +111,7 @@ int lorie_input_dispatch(void *data) {
             in->pointer_dirty = 1; break;
         case LORIE_INPUT_POINTER_BUTTON:
             wl_list_for_each(r, &in->pointers, link)
-                wl_pointer_send_button(r, ns(in), e->button.button, e->button.state);
+                wl_pointer_send_button(r, 0, ns(in), e->button.button, e->button.state);
             in->pointer_dirty = 1; break;
         case LORIE_INPUT_KEYBOARD_KEY: {
             uint32_t kc = e->key.key < 304 ? android_to_linux_keycode[e->key.key] : 0;
@@ -120,7 +120,7 @@ int lorie_input_dispatch(void *data) {
             break; }
         case LORIE_INPUT_TOUCH_DOWN:
             wl_list_for_each(r, &in->touches, link)
-                wl_touch_send_down(r, ns(in), 0, e->touch.id, wl_fixed_from_double(e->touch.x), wl_fixed_from_double(e->touch.y));
+                wl_touch_send_down(r, 0, ns(in), NULL, e->touch.id, wl_fixed_from_double(e->touch.x), wl_fixed_from_double(e->touch.y));
             in->touch_dirty = 1; break;
         case LORIE_INPUT_TOUCH_UP:
             wl_list_for_each(r, &in->touches, link)

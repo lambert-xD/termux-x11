@@ -27,7 +27,7 @@ static void params_destroy(struct wl_client *client, struct wl_resource *resourc
 
 static void params_add(struct wl_client *client, struct wl_resource *resource,
                        int32_t fd, uint32_t plane_idx, uint32_t offset,
-                       uint32_t stride, uint64_t modifier) {
+                       uint32_t stride, uint32_t modifier_hi, uint32_t modifier_lo) {
     struct lorie_buffer_params *params = wl_resource_get_user_data(resource);
     if (plane_idx >= 4) {
         wl_resource_post_error(resource, ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_PLANE_IDX,
@@ -38,23 +38,26 @@ static void params_add(struct wl_client *client, struct wl_resource *resource,
     if (params->used[plane_idx]) close(params->fd[plane_idx]);
     params->fd[plane_idx] = fd;
     params->used[plane_idx] = 1;
-    (void)client; (void)offset; (void)stride; (void)modifier;
+    (void)client; (void)offset; (void)stride; (void)modifier_hi; (void)modifier_lo;
 }
 
 static void params_create(struct wl_client *client, struct wl_resource *resource,
-                          uint32_t id, int32_t width, int32_t height, uint32_t format, uint32_t flags) {
+                          int32_t width, int32_t height, uint32_t format, uint32_t flags) {
     struct lorie_buffer_params *params = wl_resource_get_user_data(resource);
-    struct wl_resource *buffer = wl_resource_create(client, &wl_buffer_interface, 1, id);
+    for (int i = 0; i < 4; i++) if (params->used[i]) close(params->fd[i]);
+    wl_resource_destroy(resource);
+    (void)client; (void)width; (void)height; (void)format; (void)flags;
+}
+
+static void params_create_immed(struct wl_client *client, struct wl_resource *resource,
+                                uint32_t buffer_id, int32_t width, int32_t height, uint32_t format, uint32_t flags) {
+    struct lorie_buffer_params *params = wl_resource_get_user_data(resource);
+    struct wl_resource *buffer = wl_resource_create(client, &wl_buffer_interface, 1, buffer_id);
     if (!buffer) { wl_client_post_no_memory(client); return; }
     wl_resource_set_implementation(buffer, NULL, NULL, NULL);
     for (int i = 0; i < 4; i++) if (params->used[i]) close(params->fd[i]);
     wl_resource_destroy(resource);
     (void)width; (void)height; (void)format; (void)flags;
-}
-
-static void params_create_immed(struct wl_client *client, struct wl_resource *resource,
-                                uint32_t id, int32_t width, int32_t height, uint32_t format, uint32_t flags) {
-    params_create(client, resource, id, width, height, format, flags);
 }
 
 static const struct zwp_linux_buffer_params_v1_interface params_impl = {
