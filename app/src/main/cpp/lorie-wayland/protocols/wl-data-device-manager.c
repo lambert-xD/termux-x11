@@ -21,9 +21,12 @@ struct lorie_mime_type {
 struct lorie_data_offer {
     struct wl_resource *resource;
     struct lorie_data_source *source;
+    struct lorie_clipboard *clipboard;
+    int is_android_source;
 };
 
 struct lorie_data_device {
+    struct wl_list link;
     struct wl_resource *resource;
     struct wl_client *client;
     struct lorie_compositor *compositor;
@@ -75,6 +78,19 @@ static void data_offer_accept(struct wl_client *c, struct wl_resource *r, uint32
 
 static void data_offer_receive(struct wl_client *client, struct wl_resource *resource, const char *mime_type, int32_t fd) {
     struct lorie_data_offer *offer = wl_resource_get_user_data(resource);
+    if (offer && offer->is_android_source && offer->clipboard) {
+        if (lorie_clipboard_mime_type_supported(mime_type)) {
+            const char *text = NULL;
+            size_t len = 0;
+            text = lorie_clipboard_get_android_text(offer->clipboard, &len);
+            if (text && len > 0) {
+                write(fd, text, len);
+            }
+        }
+        close(fd);
+        (void)client;
+        return;
+    }
     if (offer && offer->source && lorie_clipboard_mime_type_supported(mime_type)) {
         wl_data_source_send_send(offer->source->resource, mime_type, fd);
     }
@@ -139,8 +155,36 @@ static void data_device_set_selection(struct wl_client *client, struct wl_resour
     if (!offer->resource) { free(offer); wl_client_post_no_memory(client); return; }
     wl_resource_set_implementation(offer->resource, &data_offer_impl, offer, data_offer_handle_destroy);
     offer->source = source;
+    wl_data_device_send_data_offer(device->resource, offer->resource);
+    wl_data_offer_send_offer(offer->resource, "text/plain;charset=utf-8");
+    wl_data_offer_send_offer(offer->resource, "text/plain");
     wl_data_device_send_selection(device->resource, offer->resource);
     (void)serial;
+}
+
+/* Send Android clipboard text as selection to all data devices */
+void lorie_clipboard_send_android_selection(struct lorie_compositor *c) {
+    if (!c || !c->clipboard) return;
+
+    size_t len = 0;
+    const char *text = lorie_clipboard_get_android_text(c->clipboard, &len);
+    if (!text || len == 0) return;
+
+    struct lorie_data_device *device;
+    wl_list_for_each(device, &c->data_devices, link) {
+        struct lorie_data_offer *offer = calloc(1, sizeof(*offer));
+        if (!offer) continue;
+        uint32_t id = wl_display_next_serial(wl_client_get_display(device->client));
+        offer->resource = wl_resource_create(device->client, &wl_data_offer_interface, 3, id);
+        if (!offer->resource) { free(offer); continue; }
+        wl_resource_set_implementation(offer->resource, &data_offer_impl, offer, data_offer_handle_destroy);
+        offer->clipboard = c->clipboard;
+        offer->is_android_source = 1;
+        wl_data_device_send_data_offer(device->resource, offer->resource);
+        wl_data_offer_send_offer(offer->resource, "text/plain;charset=utf-8");
+        wl_data_offer_send_offer(offer->resource, "text/plain");
+        wl_data_device_send_selection(device->resource, offer->resource);
+    }
 }
 
 static void data_device_release(struct wl_client *client, struct wl_resource *resource) {
@@ -156,6 +200,9 @@ static const struct wl_data_device_interface data_device_impl = {
 
 static void data_device_handle_destroy(struct wl_resource *resource) {
     struct lorie_data_device *device = wl_resource_get_user_data(resource);
+    if (device && device->compositor) {
+        wl_list_remove(&device->link);
+    }
     free(device);
 }
 
@@ -178,9 +225,11 @@ static void manager_get_data_device(struct wl_client *client, struct wl_resource
     if (!device) { wl_client_post_no_memory(client); return; }
     device->client = client;
     device->compositor = compositor;
+    wl_list_init(&device->link);
     device->resource = wl_resource_create(client, &wl_data_device_interface, 3, id);
     if (!device->resource) { free(device); wl_client_post_no_memory(client); return; }
     wl_resource_set_implementation(device->resource, &data_device_impl, device, data_device_handle_destroy);
+    wl_list_insert(&compositor->data_devices, &device->link);
     (void)seat;
 }
 
