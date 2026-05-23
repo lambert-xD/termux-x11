@@ -114,10 +114,32 @@ struct lorie_region {
 struct lorie_shm_pool {
     void *data;
     int32_t size;
+    int refcount;
+    int pending_destroy;
 };
 
 struct lorie_shm_pool *lorie_shm_pool_create(int fd, int32_t size);
 void lorie_shm_pool_destroy(struct lorie_shm_pool *pool);
+
+/* SHM buffer (new for PR 1) */
+struct lorie_shm_buffer {
+    struct wl_resource *resource;
+    struct lorie_shm_pool *pool;
+    int32_t offset;
+    int32_t width;
+    int32_t height;
+    int32_t stride;
+    uint32_t format;
+    void *data;
+};
+
+struct lorie_shm_buffer *lorie_shm_buffer_from_resource(struct wl_resource *resource);
+
+/* Internal — exposed for tests */
+struct wl_resource *lorie_shm_pool_create_buffer_internal(struct wl_client *client,
+    struct wl_resource *pool_resource, uint32_t id, int32_t offset, int32_t width,
+    int32_t height, int32_t stride, uint32_t format);
+void shm_pool_handle_resource_destroy(struct wl_resource *resource);
 
 enum lorie_clipboard_source {
     CLIPBOARD_SOURCE_NONE = 0,
@@ -149,6 +171,7 @@ struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,
                                                      uint32_t id);
 void lorie_surface_destroy_internal(struct lorie_surface *s);
 void lorie_surface_compute_logical_size(struct lorie_surface *s);
+void surface_commit(struct wl_client *client, struct wl_resource *resource);
 
 /* Callbacks implemented in surface.c */
 void compositor_create_surface(struct wl_client *client,

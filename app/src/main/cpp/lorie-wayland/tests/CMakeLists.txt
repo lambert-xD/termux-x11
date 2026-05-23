@@ -38,6 +38,7 @@ set(LORIE_TEST_SOURCES
     test_viewporter.c
     test_dmabuf.c
     test_clipboard.c
+    test_shm_buffer.c
 )
 
 add_executable(lorie-wayland-tests ${LORIE_TEST_SOURCES})

@@ -6,6 +6,8 @@
 #include <android/log.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <stdint.h>
+#include <limits.h>
 
 #define LOG_TAG "LorieCompositor"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -35,7 +37,40 @@ static void output_bind(struct wl_client *client, void *data,
     wl_output_send_done(resource);
 }
 
+/* --- Buffer implementation (internal) --- */
+
+static void buffer_destroy_resource(struct wl_resource *resource) {
+    struct lorie_shm_buffer *buf = wl_resource_get_user_data(resource);
+    if (!buf)
+        return;
+    if (buf->pool) {
+        buf->pool->refcount--;
+        if (buf->pool->refcount == 0 && buf->pool->pending_destroy) {
+            lorie_shm_pool_destroy(buf->pool);
+        }
+    }
+    free(buf);
+}
+
+static void buffer_destroy_request(struct wl_client *client, struct wl_resource *resource) {
+    wl_resource_destroy(resource);
+    (void)client;
+}
+
+static const struct wl_buffer_interface buffer_impl = {
+    buffer_destroy_request,
+};
+
+struct lorie_shm_buffer *lorie_shm_buffer_from_resource(struct wl_resource *resource) {
+    if (!resource)
+        return NULL;
+    if (wl_resource_instance_of(resource, &wl_buffer_interface, &buffer_impl))
+        return wl_resource_get_user_data(resource);
+    return NULL;
+}
+
 /* --- SHM pool helpers (exposed for tests) --- */
+
 struct lorie_shm_pool *lorie_shm_pool_create(int fd, int32_t size) {
     void *data = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
     if (data == MAP_FAILED) {
@@ -48,6 +83,7 @@ struct lorie_shm_pool *lorie_shm_pool_create(int fd, int32_t size) {
     }
     pool->data = data;
     pool->size = size;
+    pool->refcount = 1;
     return pool;
 }
 
@@ -65,12 +101,78 @@ static void shm_pool_destroy(struct wl_client *client, struct wl_resource *resou
     (void)client;
 }
 
+struct wl_resource *lorie_shm_pool_create_buffer_internal(struct wl_client *client,
+    struct wl_resource *pool_resource, uint32_t id, int32_t offset, int32_t width,
+    int32_t height, int32_t stride, uint32_t format) {
+    struct lorie_shm_pool *pool = wl_resource_get_user_data(pool_resource);
+
+    /* 1. Format check */
+    if (format != WL_SHM_FORMAT_ARGB8888 && format != WL_SHM_FORMAT_XRGB8888) {
+        wl_resource_post_error(pool_resource, WL_SHM_ERROR_INVALID_FORMAT,
+                               "invalid format 0x%x", format);
+        return NULL;
+    }
+
+    /* 2. Dimension check */
+    if (offset < 0 || width <= 0 || height <= 0 || stride <= 0) {
+        wl_resource_post_error(pool_resource, WL_SHM_ERROR_INVALID_STRIDE,
+                               "invalid width, height or stride (%dx%d, %d)",
+                               width, height, stride);
+        return NULL;
+    }
+
+    /* 3. Stride check */
+    int64_t min_stride = (int64_t)width * 4;
+    if (min_stride > INT32_MAX || stride < min_stride) {
+        wl_resource_post_error(pool_resource, WL_SHM_ERROR_INVALID_STRIDE,
+                               "stride %d is too small for width %d",
+                               stride, width);
+        return NULL;
+    }
+
+    /* 4. Bounds check */
+    int64_t required = (int64_t)offset + (int64_t)(height - 1) * stride + min_stride;
+    if (required > pool->size) {
+        wl_resource_post_error(pool_resource, WL_SHM_ERROR_INVALID_STRIDE,
+                               "buffer size exceeds pool (%lld > %d)",
+                               (long long)required, pool->size);
+        return NULL;
+    }
+
+    /* Allocation */
+    struct lorie_shm_buffer *buf = calloc(1, sizeof(*buf));
+    if (!buf) {
+        wl_client_post_no_memory(client);
+        return NULL;
+    }
+
+    struct wl_resource *resource = wl_resource_create(client, &wl_buffer_interface, 1, id);
+    if (!resource) {
+        free(buf);
+        wl_client_post_no_memory(client);
+        return NULL;
+    }
+
+    wl_resource_set_implementation(resource, &buffer_impl, buf, buffer_destroy_resource);
+
+    buf->resource = resource;
+    buf->pool = pool;
+    buf->offset = offset;
+    buf->width = width;
+    buf->height = height;
+    buf->stride = stride;
+    buf->format = format;
+    buf->data = (uint8_t *)pool->data + offset;
+
+    pool->refcount++;
+
+    return resource;
+}
+
 static void shm_pool_create_buffer(struct wl_client *client, struct wl_resource *resource,
                                    uint32_t id, int32_t offset, int32_t width,
                                    int32_t height, int32_t stride, uint32_t format) {
-    /* Deferred to PR #3: buffer creation from shm pool */
-    (void)client; (void)resource; (void)id; (void)offset;
-    (void)width; (void)height; (void)stride; (void)format;
+    lorie_shm_pool_create_buffer_internal(client, resource, id, offset, width, height, stride, format);
 }
 
 static void shm_pool_resize(struct wl_client *client, struct wl_resource *resource,
@@ -85,9 +187,14 @@ static const struct wl_shm_pool_interface shm_pool_impl = {
     shm_pool_resize,
 };
 
-static void shm_pool_handle_resource_destroy(struct wl_resource *resource) {
+void shm_pool_handle_resource_destroy(struct wl_resource *resource) {
     struct lorie_shm_pool *pool = wl_resource_get_user_data(resource);
-    lorie_shm_pool_destroy(pool);
+    pool->refcount--;
+    if (pool->refcount == 0) {
+        lorie_shm_pool_destroy(pool);
+    } else {
+        pool->pending_destroy = 1;
+    }
 }
 
 struct lorie_compositor *lorie_compositor_create(void) {

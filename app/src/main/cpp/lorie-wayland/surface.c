@@ -96,8 +96,8 @@ void lorie_surface_compute_logical_size(struct lorie_surface *s) {
     s->logical_height = logical_h > 0 ? logical_h : 0;
 }
 
-static void surface_commit(struct wl_client *client,
-                           struct wl_resource *resource) {
+void surface_commit(struct wl_client *client,
+                    struct wl_resource *resource) {
     struct lorie_surface *s = wl_resource_get_user_data(resource);
     if (s->pending_attached) {
         if (s->buffer_resource) {
@@ -114,27 +114,23 @@ static void surface_commit(struct wl_client *client,
         s->pending_attached = 0;
 
         if (s->buffer_resource) {
-            struct wl_shm_buffer *shm = wl_shm_buffer_get(s->buffer_resource);
+            struct lorie_shm_buffer *shm = lorie_shm_buffer_from_resource(s->buffer_resource);
             if (shm) {
-                int32_t w = wl_shm_buffer_get_width(shm);
-                int32_t h = wl_shm_buffer_get_height(shm);
-                int32_t stride = wl_shm_buffer_get_stride(shm);
-                uint32_t fmt = wl_shm_buffer_get_format(shm);
-                int8_t lfmt = (fmt == WL_SHM_FORMAT_ARGB8888)
+                int8_t lfmt = (shm->format == WL_SHM_FORMAT_ARGB8888)
                     ? AHARDWAREBUFFER_FORMAT_B8G8R8A8_UNORM
                     : AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM;
-                LorieBuffer *lb = LorieBuffer_allocate(w, h, lfmt, LORIEBUFFER_REGULAR);
+                LorieBuffer *lb = LorieBuffer_allocate(shm->width, shm->height, lfmt, LORIEBUFFER_REGULAR);
                 if (lb) {
                     const LorieBuffer_Desc *desc = LorieBuffer_description(lb);
                     uint8_t *dst = (uint8_t*)desc->data;
-                    uint8_t *src = (uint8_t*)wl_shm_buffer_get_data(shm);
-                    int dst_stride = w * 4;
-                    for (int row = 0; row < h; row++) {
-                        memcpy(dst + row * dst_stride, src + row * stride, w * 4);
+                    uint8_t *src = (uint8_t*)shm->data;
+                    int dst_stride = shm->width * 4;
+                    for (int row = 0; row < shm->height; row++) {
+                        memcpy(dst + row * dst_stride, src + row * shm->stride, shm->width * 4);
                     }
                     s->buffer = lb;
-                    s->width = w;
-                    s->height = h;
+                    s->width = shm->width;
+                    s->height = shm->height;
                 }
             }
         }
