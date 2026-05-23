@@ -26,6 +26,7 @@ extern int lorie_test_viewporter_suite(struct lorie_test_suite* suite);
 extern int lorie_test_dmabuf_suite(struct lorie_test_suite* suite);
 extern int lorie_test_clipboard_suite(struct lorie_test_suite* suite);
 extern int lorie_test_shm_buffer_suite(struct lorie_test_suite* suite);
+extern int lorie_test_output_suite(struct lorie_test_suite* suite);
 
 int main(int argc, char** argv) {
     struct lorie_test_suite framework_suite;
@@ -82,6 +83,9 @@ int main(int argc, char** argv) {
     struct lorie_test_suite shm_buffer_suite;
     lorie_test_shm_buffer_suite(&shm_buffer_suite);
 
+    struct lorie_test_suite output_suite;
+    lorie_test_output_suite(&output_suite);
+
     struct lorie_test_suite* suites[] = {
         &framework_suite,
         &build_suite,
@@ -101,6 +105,7 @@ int main(int argc, char** argv) {
         &dmabuf_suite,
         &clipboard_suite,
         &shm_buffer_suite,
+        &output_suite,
     };
 
     return lorie_test_main(argc, argv, suites, sizeof(suites) / sizeof(suites[0]));

@@ -68,7 +68,7 @@ static void clipboard_callback(const char *text, size_t len, void *user_data) {
 }
 
 /* Forward declarations for dynamic registration */
-JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_surfaceChanged(JNIEnv*, jobject, jobject);
+JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_surfaceChanged(JNIEnv*, jobject, jobject, jint, jint);
 JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_sendMouseEvent(JNIEnv*, jobject, jfloat, jfloat, jint, jboolean, jboolean);
 JNIEXPORT void JNICALL Java_com_termux_x11_LorieWaylandView_sendTouchEvent(JNIEnv*, jobject, jint, jint, jint, jint);
 JNIEXPORT jboolean JNICALL Java_com_termux_x11_LorieWaylandView_sendKeyEvent(JNIEnv*, jobject, jint, jint, jboolean);
@@ -83,7 +83,7 @@ const int lorie_wayland_native_method_count = 6;
 JNIEXPORT void JNICALL
 Java_com_termux_x11_LorieWaylandView_nativeInit(JNIEnv *env, jclass clazz) {
     JNINativeMethod methods[] = {
-        {"surfaceChanged", "(Landroid/view/Surface;)V",
+        {"surfaceChanged", "(Landroid/view/Surface;II)V",
          (void*)&Java_com_termux_x11_LorieWaylandView_surfaceChanged},
         {"sendMouseEvent", "(FFIZZ)V",
          (void*)&Java_com_termux_x11_LorieWaylandView_sendMouseEvent},
@@ -104,10 +104,18 @@ Java_com_termux_x11_LorieWaylandView_nativeInit(JNIEnv *env, jclass clazz) {
 
 JNIEXPORT void JNICALL
 Java_com_termux_x11_LorieWaylandView_surfaceChanged(JNIEnv *env, jobject thiz,
-                                                     jobject surface) {
+                                                     jobject surface,
+                                                     jint width, jint height) {
     (void)thiz;
     ANativeWindow *win = surface ? ANativeWindow_fromSurface(env, surface) : NULL;
-    if (g_compositor) lorie_compositor_set_window(g_compositor, win);
+    if (g_compositor) {
+        lorie_compositor_set_window(g_compositor, win);
+        if (width > 0 && height > 0 && !wl_list_empty(&g_compositor->outputs)) {
+            struct lorie_output *output =
+                wl_container_of(g_compositor->outputs.next, output, link);
+            lorie_output_update_size(output, width, height, output->scale);
+        }
+    }
     if (g_renderer)   lorie_renderer_set_window(g_renderer, win);
     if (win) ANativeWindow_release(win);
 }
@@ -254,6 +262,11 @@ Java_com_termux_x11_WaylandEntryPoint_start(JNIEnv *env, jclass clazz,
         lorie_clipboard_set_text_callback(g_compositor->clipboard, clipboard_callback, NULL);
     }
 
+    /* Create default output so wl_output global exists */
+    if (wl_list_empty(&g_compositor->outputs)) {
+        lorie_output_create(g_compositor, 1920, 1080, 1);
+    }
+
     if (lorie_setup_wayland_runtime_dir() != 0) goto fail;
     const char *wayland_display = getenv("WAYLAND_DISPLAY");
     lorie_compositor_set_socket_name(g_compositor,
@@ -328,6 +341,11 @@ Java_com_termux_x11_WaylandCmdEntryPoint_start(JNIEnv *env, jclass clazz,
     /* Register clipboard callback for Wayland→Android forwarding */
     if (g_compositor->clipboard) {
         lorie_clipboard_set_text_callback(g_compositor->clipboard, clipboard_callback, NULL);
+    }
+
+    /* Create default output so wl_output global exists */
+    if (wl_list_empty(&g_compositor->outputs)) {
+        lorie_output_create(g_compositor, 1920, 1080, 1);
     }
 
     if (lorie_setup_wayland_runtime_dir() != 0) goto fail_cmd;

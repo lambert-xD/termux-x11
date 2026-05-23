@@ -57,6 +57,7 @@ struct lorie_output *lorie_output_create(struct lorie_compositor *c,
     output->scale = scale;
     output->refresh = 60;
     strncpy(output->name, "Lorie-0", sizeof(output->name) - 1);
+    wl_list_init(&output->bound_resources);
 
     wl_list_insert(&c->outputs, &output->link);
 
@@ -74,6 +75,40 @@ void lorie_output_destroy(struct lorie_output *output) {
         wl_global_destroy(output->global);
     }
 
+    struct lorie_output_resource *or, *or_tmp;
+    wl_list_for_each_safe(or, or_tmp, &output->bound_resources, link) {
+        if (or->resource)
+            wl_resource_set_user_data(or->resource, NULL);
+        wl_list_remove(&or->link);
+        free(or);
+    }
+
     free(output);
     LOGI("Output destroyed");
+}
+
+void lorie_output_update_size(struct lorie_output *output,
+                               int32_t w, int32_t h, int32_t scale) {
+    if (!output || w <= 0 || h <= 0 || scale <= 0) {
+        LOGE("Invalid output update dimensions: %dx%d@%d", w, h, scale);
+        return;
+    }
+    output->width = w;
+    output->height = h;
+    output->scale = scale;
+    struct lorie_output_resource *or;
+    wl_list_for_each(or, &output->bound_resources, link) {
+        if (or->resource) {
+            wl_output_send_geometry(or->resource, 0, 0,
+                                    output->width, output->height, 0,
+                                    "Unknown", "Unknown", 0);
+            wl_output_send_mode(or->resource, 0,
+                                output->width, output->height,
+                                output->refresh);
+            if (wl_resource_get_version(or->resource) >= WL_OUTPUT_SCALE_SINCE_VERSION)
+                wl_output_send_scale(or->resource, output->scale);
+            wl_output_send_done(or->resource);
+        }
+    }
+    LOGI("Output updated: %dx%d@%d", w, h, scale);
 }

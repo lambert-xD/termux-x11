@@ -13,6 +13,7 @@ set(LORIE_TEST_SOURCES
     test_renderer.c
     test_input.c
     test_protocols.c
+    test_output.c
     ../compositor.c
     ../output.c
     ../surface.c

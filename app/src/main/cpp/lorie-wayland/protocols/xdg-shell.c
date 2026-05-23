@@ -52,8 +52,15 @@ void lorie_xdg_surface_handle_commit(struct lorie_surface *s, struct wl_client *
             wl_array_init(&states);
             uint32_t *state = wl_array_add(&states, sizeof(uint32_t));
             if (state) {
+                int32_t tw = 0, th = 0;
+                if (s->compositor && !wl_list_empty(&s->compositor->outputs)) {
+                    struct lorie_output *out =
+                        wl_container_of(s->compositor->outputs.next, out, link);
+                    tw = out->width;
+                    th = out->height;
+                }
                 *state = XDG_TOPLEVEL_STATE_FULLSCREEN;
-                xdg_toplevel_send_configure(toplevel->resource, 0, 0, &states);
+                xdg_toplevel_send_configure(toplevel->resource, tw, th, &states);
             }
             wl_array_release(&states);
         }

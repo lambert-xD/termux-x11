@@ -20,6 +20,14 @@ static void subcompositor_bind(struct wl_client *client, void *data,
                                uint32_t version, uint32_t id);
 static void shm_bind(struct wl_client *client, void *data,
                      uint32_t version, uint32_t id);
+static void output_resource_handle_destroy(struct wl_resource *resource) {
+    struct lorie_output_resource *or = wl_resource_get_user_data(resource);
+    if (or) {
+        wl_list_remove(&or->link);
+        free(or);
+    }
+}
+
 static void output_bind(struct wl_client *client, void *data,
                         uint32_t version, uint32_t id) {
     struct lorie_output *output = data;
@@ -29,11 +37,20 @@ static void output_bind(struct wl_client *client, void *data,
         wl_client_post_no_memory(client);
         return;
     }
-    wl_resource_set_implementation(resource, NULL, output, NULL);
+    struct lorie_output_resource *or = calloc(1, sizeof(*or));
+    if (!or) {
+        wl_resource_destroy(resource);
+        wl_client_post_no_memory(client);
+        return;
+    }
+    or->resource = resource;
+    wl_list_insert(&output->bound_resources, &or->link);
+    wl_resource_set_implementation(resource, NULL, or, output_resource_handle_destroy);
     wl_output_send_geometry(resource, 0, 0, output->width, output->height, 0,
                             "Unknown", "Unknown", 0);
     wl_output_send_mode(resource, 0, output->width, output->height, output->refresh);
-    wl_output_send_scale(resource, output->scale);
+    if (version >= WL_OUTPUT_SCALE_SINCE_VERSION)
+        wl_output_send_scale(resource, output->scale);
     wl_output_send_done(resource);
 }
 

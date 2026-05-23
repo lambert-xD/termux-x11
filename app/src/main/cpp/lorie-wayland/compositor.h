@@ -73,10 +73,16 @@ void lorie_clipboard_send_android_selection(struct lorie_compositor *c);
 void lorie_compositor_create_dmabuf_global(struct lorie_compositor *c);
 
 /* Output API */
+struct lorie_output_resource {
+    struct wl_list link;
+    struct wl_resource *resource;
+};
+
 struct lorie_output {
     struct wl_list link;
     struct lorie_compositor *compositor;
     struct wl_global *global;
+    struct wl_list bound_resources;
     int32_t width;
     int32_t height;
     int32_t scale;
@@ -87,6 +93,8 @@ struct lorie_output {
 struct lorie_output *lorie_output_create(struct lorie_compositor *c,
                                           int32_t width, int32_t height, int32_t scale);
 void lorie_output_destroy(struct lorie_output *output);
+void lorie_output_update_size(struct lorie_output *output,
+                               int32_t w, int32_t h, int32_t scale);
 
 /* Surface types (defined in surface.c) */
 struct lorie_frame_callback {

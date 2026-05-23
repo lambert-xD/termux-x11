@@ -234,7 +234,7 @@ static void test_dmabuf_global_exists(void) {
     lorie_compositor_stop(g_comp);
 }
 
-/* Test 8: wl_data_device_manager global exists */
+/* Test 11: wl_data_device_manager global exists */
 static void test_data_device_manager_exists(void) {
     int ret = lorie_compositor_start(g_comp);
     ASSERT_EQ_INT(0, ret);

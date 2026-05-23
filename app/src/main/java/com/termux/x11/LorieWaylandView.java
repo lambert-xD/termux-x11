@@ -26,12 +26,12 @@ public class LorieWaylandView extends SurfaceView implements SurfaceHolder.Callb
 
     @Override public void surfaceCreated(SurfaceHolder h) {}
     @Override public void surfaceChanged(SurfaceHolder h, int f, int w, int h2) {
-        surfaceChanged(h.getSurface());
+        surfaceChanged(h.getSurface(), w, h2);
     }
-    @Override public void surfaceDestroyed(SurfaceHolder h) { surfaceChanged(null); }
+    @Override public void surfaceDestroyed(SurfaceHolder h) { surfaceChanged(null, 0, 0); }
 
     public static native void nativeInit();
-    public static native void surfaceChanged(Surface surface);
+    public static native void surfaceChanged(Surface surface, int width, int height);
     public static native void sendMouseEvent(float x, float y, int button,
                                               boolean down, boolean relative);
     public static native void sendTouchEvent(int action, int id, int x, int y);
