@@ -154,6 +154,8 @@ void surface_commit(struct wl_client *client,
         wl_resource_destroy(cb->resource);
     }
     wl_list_init(&s->frame_callbacks);
+
+    lorie_xdg_surface_handle_commit(s, client);
     (void)client;
 }
 
@@ -223,6 +225,10 @@ static void surface_handle_resource_destroy(struct wl_resource *resource) {
         wl_resource_destroy(cb->resource);
     }
     pixman_region32_fini(&s->damage);
+    if (s->xdg_surface) {
+        s->xdg_surface->surface = NULL;
+        s->xdg_surface = NULL;
+    }
     free(s);
 }
 
@@ -261,6 +267,10 @@ void lorie_surface_destroy_internal(struct lorie_surface *s) {
     if (s->resource)
         wl_resource_destroy(s->resource);
     else {
+        if (s->xdg_surface) {
+            s->xdg_surface->surface = NULL;
+            s->xdg_surface = NULL;
+        }
         wl_list_remove(&s->link);
         wl_list_remove(&s->subsurface_link);
         pixman_region32_fini(&s->damage);

@@ -13,6 +13,13 @@ struct lorie_output;
 struct lorie_surface;
 struct lorie_region;
 struct lorie_clipboard;
+struct lorie_xdg_surface {
+    struct wl_resource *resource;
+    struct lorie_surface *surface;
+    struct wl_resource *role; /* toplevel or popup */
+    uint32_t pending_configure_serial;
+    int configured;
+};
 
 struct lorie_compositor {
     struct wl_display *display;
@@ -99,6 +106,7 @@ struct lorie_surface {
     struct wl_list subsurfaces;
     void *buffer; /* LorieBuffer* — imported from wl_shm_buffer */
     struct wl_resource *viewport_resource;
+    struct lorie_xdg_surface *xdg_surface;
     struct {
         double src_x, src_y, src_w, src_h;
         int has_src;
@@ -174,6 +182,11 @@ struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,
 void lorie_surface_destroy_internal(struct lorie_surface *s);
 void lorie_surface_compute_logical_size(struct lorie_surface *s);
 void surface_commit(struct wl_client *client, struct wl_resource *resource);
+
+/* xdg-shell internal — exposed for tests */
+void lorie_xdg_surface_handle_commit(struct lorie_surface *s, struct wl_client *client);
+void lorie_xdg_surface_send_configure_internal(struct lorie_xdg_surface *xdg_surf, uint32_t serial);
+void lorie_xdg_surface_ack_configure_internal(struct lorie_xdg_surface *xdg_surf, uint32_t serial);
 
 /* Callbacks implemented in surface.c */
 void compositor_create_surface(struct wl_client *client,
