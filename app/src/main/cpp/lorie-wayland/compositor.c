@@ -233,7 +233,7 @@ struct lorie_compositor *lorie_compositor_create(void) {
     }
 
     c->compositor_global = wl_global_create(
-        c->display, &wl_compositor_interface, 5, c, compositor_bind);
+        c->display, &wl_compositor_interface, 6, c, compositor_bind);
     if (!c->compositor_global) {
         LOGE("Failed to create wl_compositor global");
         goto fail_globals;

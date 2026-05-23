@@ -475,7 +475,7 @@ static void test_lorie_shm_buffer_from_resource_wrong_type(void) {
     struct test_ctx *ctx = setup_ctx(4096);
 
     struct wl_resource *surface_res = wl_resource_create(
-        ctx->client, &wl_surface_interface, 5, 99);
+        ctx->client, &wl_surface_interface, 6, 99);
     ASSERT_NOT_NULL(surface_res);
 
     struct lorie_shm_buffer *buf = lorie_shm_buffer_from_resource(surface_res);
@@ -620,7 +620,7 @@ static void test_surface_commit_non_shm_buffer(void) {
     struct lorie_surface *s = create_test_surface(ctx);
 
     struct wl_resource *non_buf = wl_resource_create(
-        ctx->client, &wl_surface_interface, 5, 99);
+        ctx->client, &wl_surface_interface, 6, 99);
     ASSERT_NOT_NULL(non_buf);
 
     s->pending_buffer = non_buf;

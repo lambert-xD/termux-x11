@@ -4,12 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-struct lorie_xdg_toplevel {
-    struct wl_resource *resource;
-    struct lorie_xdg_surface *xdg_surface;
-    char *title;
-    char *app_id;
-};
+static const struct xdg_toplevel_interface xdg_toplevel_impl;
 
 /* Internal: send xdg_surface.configure with a given serial */
 void lorie_xdg_surface_send_configure_internal(struct lorie_xdg_surface *xdg_surf, uint32_t serial) {
@@ -37,6 +32,17 @@ void lorie_xdg_surface_handle_commit(struct lorie_surface *s, struct wl_client *
 
     struct wl_display *display = wl_client_get_display(client);
     uint32_t serial = wl_display_next_serial(display);
+
+    /* Send preferred_buffer_scale before configure (wl_surface v6) */
+    if (s->resource) {
+        int32_t scale = 1;
+        if (s->compositor && !wl_list_empty(&s->compositor->outputs)) {
+            struct lorie_output *output =
+                wl_container_of(s->compositor->outputs.next, output, link);
+            scale = output->scale;
+        }
+        wl_surface_send_preferred_buffer_scale(s->resource, scale);
+    }
 
     /* If role is toplevel, send toplevel.configure first */
     if (xdg_surf->role && wl_resource_get_interface(xdg_surf->role) == &xdg_toplevel_interface) {
@@ -101,7 +107,8 @@ static void xdg_surface_get_toplevel(struct wl_client *client, struct wl_resourc
     if (!toplevel) { wl_client_post_no_memory(client); return; }
     toplevel->resource = wl_resource_create(client, &xdg_toplevel_interface, 1, id);
     if (!toplevel->resource) { free(toplevel); wl_client_post_no_memory(client); return; }
-    wl_resource_set_implementation(toplevel->resource, NULL, toplevel, NULL);
+    wl_resource_set_implementation(toplevel->resource, &xdg_toplevel_impl, toplevel,
+                                   xdg_toplevel_handle_resource_destroy);
     toplevel->xdg_surface = xdg_surf;
     xdg_surf->role = toplevel->resource;
 }
@@ -217,7 +224,7 @@ static const struct xdg_toplevel_interface xdg_toplevel_impl = {
     xdg_toplevel_set_minimized,
 };
 
-static void xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
+void xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
     struct lorie_xdg_toplevel *toplevel = wl_resource_get_user_data(resource);
     if (toplevel) {
         if (toplevel->xdg_surface) toplevel->xdg_surface->role = NULL;
@@ -236,6 +243,11 @@ static void xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
             struct lorie_xdg_toplevel *toplevel = wl_resource_get_user_data(xdg_surf->role);
             if (toplevel)
                 toplevel->xdg_surface = NULL;
+        }
+        /* Destroy role resource if still alive */
+        if (xdg_surf->role) {
+            wl_resource_destroy(xdg_surf->role);
+            xdg_surf->role = NULL;
         }
         free(xdg_surf);
     }

@@ -119,7 +119,114 @@ static void test_xdg_surface_ack_configure_before_configured(void) {
     free(xdg);
 }
 
-/* Test 7: linux_dmabuf global exists */
+/* Test 7: unconfigured buffer prevents configure */
+static void test_xdg_surface_unconfigured_buffer_error(void) {
+    int ret = lorie_compositor_start(g_comp);
+    ASSERT_EQ_INT(0, ret);
+
+    int fds[2];
+    ret = socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds);
+    ASSERT_EQ_INT(0, ret);
+
+    struct wl_client *client = wl_client_create(g_comp->display, fds[0]);
+    ASSERT_NOT_NULL(client);
+
+    struct lorie_surface *s = lorie_surface_create_internal(g_comp, client, 100);
+    ASSERT_NOT_NULL(s);
+    ASSERT_NOT_NULL(s->resource);
+
+    struct lorie_xdg_surface *xdg = calloc(1, sizeof(*xdg));
+    ASSERT_NOT_NULL(xdg);
+    xdg->resource = wl_resource_create(client, &xdg_surface_interface, 1, 200);
+    s->xdg_surface = xdg;
+    xdg->surface = s;
+    /* Simulate buffer attached before configure */
+    s->pending_attached = 1;
+    s->pending_buffer = (struct wl_resource *)0x1234;
+
+    ASSERT_EQ_INT(0, xdg->configured);
+    surface_commit(client, s->resource);
+    ASSERT_EQ_INT(0, xdg->configured);
+    ASSERT_EQ_INT(0, xdg->pending_configure_serial);
+    ASSERT_EQ_INT(0, s->pending_attached);
+    ASSERT_EQ_PTR(NULL, s->pending_buffer);
+
+    s->xdg_surface = NULL;
+    free(xdg);
+    lorie_surface_destroy_internal(s);
+    wl_client_destroy(client);
+    close(fds[1]);
+}
+
+/* Test 8: preferred_buffer_scale path sends configure */
+static void test_xdg_surface_preferred_buffer_scale_sent(void) {
+    int ret = lorie_compositor_start(g_comp);
+    ASSERT_EQ_INT(0, ret);
+
+    int fds[2];
+    ret = socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds);
+    ASSERT_EQ_INT(0, ret);
+
+    struct wl_client *client = wl_client_create(g_comp->display, fds[0]);
+    ASSERT_NOT_NULL(client);
+
+    struct lorie_surface *s = lorie_surface_create_internal(g_comp, client, 100);
+    ASSERT_NOT_NULL(s);
+    ASSERT_NOT_NULL(s->resource);
+
+    struct lorie_xdg_surface *xdg = calloc(1, sizeof(*xdg));
+    ASSERT_NOT_NULL(xdg);
+    xdg->resource = wl_resource_create(client, &xdg_surface_interface, 1, 200);
+    s->xdg_surface = xdg;
+    xdg->surface = s;
+
+    ASSERT_EQ_INT(0, xdg->configured);
+    ASSERT_EQ_INT(6, wl_resource_get_version(s->resource));
+    lorie_xdg_surface_handle_commit(s, client);
+    ASSERT_EQ_INT(1, xdg->configured);
+    ASSERT_TRUE(xdg->pending_configure_serial != 0);
+
+    s->xdg_surface = NULL;
+    free(xdg);
+    lorie_surface_destroy_internal(s);
+    wl_client_destroy(client);
+    close(fds[1]);
+}
+
+/* Test 9: toplevel destroy cleans role pointer */
+static void test_xdg_toplevel_destroy_cleans_role(void) {
+    int ret = lorie_compositor_start(g_comp);
+    ASSERT_EQ_INT(0, ret);
+
+    int fds[2];
+    ret = socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds);
+    ASSERT_EQ_INT(0, ret);
+
+    struct wl_client *client = wl_client_create(g_comp->display, fds[0]);
+    ASSERT_NOT_NULL(client);
+
+    struct lorie_xdg_surface *xdg = calloc(1, sizeof(*xdg));
+    ASSERT_NOT_NULL(xdg);
+    struct lorie_xdg_toplevel *toplevel = calloc(1, sizeof(*toplevel));
+    ASSERT_NOT_NULL(toplevel);
+    toplevel->xdg_surface = xdg;
+
+    struct wl_resource *toplevel_res = wl_resource_create(client, &xdg_toplevel_interface, 1, 300);
+    ASSERT_NOT_NULL(toplevel_res);
+    wl_resource_set_implementation(toplevel_res, NULL, toplevel, xdg_toplevel_handle_resource_destroy);
+    xdg->role = toplevel_res;
+
+    wl_resource_destroy(toplevel_res);
+    /* After toplevel destroy, xdg->role should be NULL */
+    ASSERT_EQ_PTR(NULL, xdg->role);
+
+    free(xdg);
+    /* toplevel was freed by the destroy handler */
+    wl_client_destroy(client);
+    close(fds[1]);
+}
+
+/* Test 10: linux_dmabuf global exists */
 static void test_dmabuf_global_exists(void) {
     int ret = lorie_compositor_start(g_comp);
     ASSERT_EQ_INT(0, ret);
@@ -143,6 +250,9 @@ int lorie_test_protocols_suite(struct lorie_test_suite *suite) {
     SUITE_ADD(suite, test_xdg_surface_ack_configure_valid);
     SUITE_ADD(suite, test_xdg_surface_ack_configure_invalid);
     SUITE_ADD(suite, test_xdg_surface_ack_configure_before_configured);
+    SUITE_ADD(suite, test_xdg_surface_unconfigured_buffer_error);
+    SUITE_ADD(suite, test_xdg_surface_preferred_buffer_scale_sent);
+    SUITE_ADD(suite, test_xdg_toplevel_destroy_cleans_role);
     SUITE_ADD(suite, test_dmabuf_global_exists);
     SUITE_ADD(suite, test_data_device_manager_exists);
     return 0;

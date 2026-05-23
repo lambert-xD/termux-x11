@@ -21,6 +21,13 @@ struct lorie_xdg_surface {
     int configured;
 };
 
+struct lorie_xdg_toplevel {
+    struct wl_resource *resource;
+    struct lorie_xdg_surface *xdg_surface;
+    char *title;
+    char *app_id;
+};
+
 struct lorie_compositor {
     struct wl_display *display;
     struct wl_event_loop *event_loop;
@@ -187,6 +194,7 @@ void surface_commit(struct wl_client *client, struct wl_resource *resource);
 void lorie_xdg_surface_handle_commit(struct lorie_surface *s, struct wl_client *client);
 void lorie_xdg_surface_send_configure_internal(struct lorie_xdg_surface *xdg_surf, uint32_t serial);
 void lorie_xdg_surface_ack_configure_internal(struct lorie_xdg_surface *xdg_surf, uint32_t serial);
+void xdg_toplevel_handle_resource_destroy(struct wl_resource *resource);
 
 /* Callbacks implemented in surface.c */
 void compositor_create_surface(struct wl_client *client,

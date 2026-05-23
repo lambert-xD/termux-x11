@@ -7,6 +7,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Generated protocol header for xdg-shell error codes */
+#include "stable-xdg-shell-xdg-shell.h"
+
 /* Forward declaration needed for surface_impl table */
 static void surface_handle_resource_destroy(struct wl_resource *resource);
 
@@ -99,6 +102,19 @@ void lorie_surface_compute_logical_size(struct lorie_surface *s) {
 void surface_commit(struct wl_client *client,
                     struct wl_resource *resource) {
     struct lorie_surface *s = wl_resource_get_user_data(resource);
+
+    /* xdg-shell: reject buffer attach before first configure */
+    if (s->xdg_surface && !s->xdg_surface->configured && s->pending_attached) {
+        if (s->xdg_surface->resource)
+            wl_resource_post_error(s->xdg_surface->resource,
+                XDG_SURFACE_ERROR_UNCONFIGURED_BUFFER,
+                "buffer attached before first configure");
+        s->pending_attached = 0;
+        s->pending_buffer = NULL;
+        /* Do not send configure or frame callbacks for rejected commits */
+        return;
+    }
+
     if (s->pending_attached) {
         if (s->buffer_resource) {
             wl_buffer_send_release(s->buffer_resource);
@@ -248,7 +264,7 @@ struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,
     wl_list_init(&s->subsurface_link);
     pixman_region32_init(&s->damage);
     if (client) {
-        s->resource = wl_resource_create(client, &wl_surface_interface, 5, id);
+        s->resource = wl_resource_create(client, &wl_surface_interface, 6, id);
         if (!s->resource) {
             pixman_region32_fini(&s->damage);
             free(s);
