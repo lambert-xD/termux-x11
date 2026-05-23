@@ -384,6 +384,12 @@ Java_com_termux_x11_WaylandCmdEntryPoint_getWaylandConnection(JNIEnv *env, jobje
     return NULL;
 }
 
+JNIEXPORT jobject JNICALL
+Java_com_termux_x11_WaylandCmdEntryPoint_getLogcatOutput(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    return NULL;
+}
+
 JNIEXPORT void JNICALL
 Java_com_termux_x11_WaylandCmdEntryPoint_listenForConnections(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;

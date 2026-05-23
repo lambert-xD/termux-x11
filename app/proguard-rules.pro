@@ -8,12 +8,20 @@
     void resetIme();
 }
 
+-keep class com.termux.x11.LorieWaylandView {
+    native <methods>;
+}
+
 -keep class com.termux.x11.MainActivity {
     public static com.termux.x11.MainActivity getInstance();
     void clientConnectedStateChanged();
 }
 
 -keep class com.termux.x11.CmdEntryPoint {
+    public static void main(java.lang.String[]);
+}
+
+-keep class com.termux.x11.WaylandCmdEntryPoint {
     public static void main(java.lang.String[]);
 }
 
