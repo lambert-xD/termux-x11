@@ -42,6 +42,9 @@ app/.cxx/*
 # Local Pi runtime state
 .atl/
 
+# Local OpenSpec archive snapshots
+openspec/changes/archive/
+
 # Build artifacts
 app/src/main/cpp/build-test/
 app/src/main/cpp/.pi-lens/
