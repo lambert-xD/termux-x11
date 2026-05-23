@@ -36,6 +36,7 @@ struct lorie_compositor {
     pthread_t event_loop_thread;
     struct lorie_input *input;
     struct lorie_renderer *renderer;
+    char socket_name[64];
 };
 
 struct lorie_compositor *lorie_compositor_create(void);
@@ -43,6 +44,7 @@ void lorie_compositor_destroy(struct lorie_compositor *c);
 int lorie_compositor_start(struct lorie_compositor *c);
 void lorie_compositor_stop(struct lorie_compositor *c);
 void lorie_compositor_set_window(struct lorie_compositor *c, ANativeWindow *window);
+void lorie_compositor_set_socket_name(struct lorie_compositor *c, const char *name);
 
 /* Protocol globals */
 struct wl_global *lorie_xdg_shell_create(struct wl_display *display);

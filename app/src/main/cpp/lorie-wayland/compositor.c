@@ -361,10 +361,20 @@ int lorie_compositor_start(struct lorie_compositor *c) {
     if (c->running)
         return 0;
 
-    const char *socket_name = wl_display_add_socket_auto(c->display);
-    if (!socket_name) {
-        LOGE("Failed to add socket");
-        return -1;
+    const char *name = c->socket_name[0] ? c->socket_name : NULL;
+    const char *socket_name;
+    if (name) {
+        if (wl_display_add_socket(c->display, name) != 0) {
+            LOGE("Failed to add socket");
+            return -1;
+        }
+        socket_name = name;
+    } else {
+        socket_name = wl_display_add_socket_auto(c->display);
+        if (!socket_name) {
+            LOGE("Failed to add socket");
+            return -1;
+        }
     }
     LOGI("Wayland socket: %s", socket_name);
 
@@ -440,6 +450,12 @@ void lorie_compositor_set_window(struct lorie_compositor *c,
     pthread_mutex_unlock(&c->lock);
 
     LOGI("Window set to %p", (void *)window);
+}
+
+void lorie_compositor_set_socket_name(struct lorie_compositor *c, const char *name) {
+    if (!c || !name) return;
+    strncpy(c->socket_name, name, sizeof(c->socket_name) - 1);
+    c->socket_name[sizeof(c->socket_name) - 1] = '\0';
 }
 
 /* Forward declarations — implemented in surface.c */

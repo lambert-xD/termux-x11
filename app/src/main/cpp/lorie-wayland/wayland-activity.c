@@ -16,6 +16,8 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <errno.h>
 #include "compositor.h"
 #include "input.h"
 #include "renderer.h"
@@ -189,6 +191,41 @@ Java_com_termux_x11_LorieWaylandView_sendClipboardEvent(JNIEnv *env, jobject thi
 
 
 
+int lorie_setup_wayland_runtime_dir(void) {
+    const char *xdg_runtime = getenv("XDG_RUNTIME_DIR");
+    const char *tmpdir = getenv("TMPDIR");
+    char runtime_dir[1024] = {0};
+
+    if (xdg_runtime && xdg_runtime[0]) {
+        strncpy(runtime_dir, xdg_runtime, sizeof(runtime_dir) - 1);
+    } else if (tmpdir && tmpdir[0]) {
+        strncpy(runtime_dir, tmpdir, sizeof(runtime_dir) - 1);
+    } else if (access("/data/data/com.termux/files/usr/tmp", F_OK) == 0) {
+        strcpy(runtime_dir, "/data/data/com.termux/files/usr/tmp");
+    } else if (access("/tmp", F_OK) == 0) {
+        strcpy(runtime_dir, "/tmp");
+    }
+
+    if (runtime_dir[0]) {
+        if (mkdir(runtime_dir, 0700) != 0 && errno != EEXIST) {
+            LOGE("Failed to create runtime dir %s: %s", runtime_dir, strerror(errno));
+            return -1;
+        }
+        if (chmod(runtime_dir, 0700) != 0) {
+            LOGE("Failed to chmod runtime dir %s: %s", runtime_dir, strerror(errno));
+            return -1;
+        }
+        setenv("XDG_RUNTIME_DIR", runtime_dir, 1);
+    }
+
+    const char *wayland_display = getenv("WAYLAND_DISPLAY");
+    if (!wayland_display || !wayland_display[0]) {
+        wayland_display = "wayland-0";
+        setenv("WAYLAND_DISPLAY", wayland_display, 1);
+    }
+    return 0;
+}
+
 JNIEXPORT jboolean JNICALL
 Java_com_termux_x11_WaylandEntryPoint_start(JNIEnv *env, jclass clazz,
                                             jobjectArray args) {
@@ -216,6 +253,11 @@ Java_com_termux_x11_WaylandEntryPoint_start(JNIEnv *env, jclass clazz,
     if (g_compositor->clipboard) {
         lorie_clipboard_set_text_callback(g_compositor->clipboard, clipboard_callback, NULL);
     }
+
+    if (lorie_setup_wayland_runtime_dir() != 0) goto fail;
+    const char *wayland_display = getenv("WAYLAND_DISPLAY");
+    lorie_compositor_set_socket_name(g_compositor,
+        wayland_display ? wayland_display : "wayland-0");
 
     if (lorie_compositor_start(g_compositor) != 0) goto fail;
     return JNI_TRUE;
@@ -257,5 +299,95 @@ Java_com_termux_x11_WaylandEntryPoint_stop(JNIEnv *env, jclass clazz) {
 JNIEXPORT jboolean JNICALL
 Java_com_termux_x11_WaylandEntryPoint_connected(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
-    return g_compositor ? JNI_TRUE : JNI_FALSE;
+    return (g_compositor && g_compositor->running) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_termux_x11_WaylandCmdEntryPoint_start(JNIEnv *env, jclass clazz,
+                                               jobjectArray args) {
+    (void)args;
+    if (g_compositor) return JNI_TRUE;
+
+    /* Store JavaVM for clipboard callback */
+    (*env)->GetJavaVM(env, &g_jvm);
+    jclass lorieViewClass = (*env)->FindClass(env, "com/termux/x11/LorieWaylandView");
+    if (lorieViewClass) {
+        g_lorie_view = (*env)->NewGlobalRef(env, lorieViewClass);
+        (*env)->DeleteLocalRef(env, lorieViewClass);
+    }
+
+    g_compositor = lorie_compositor_create();
+    if (!g_compositor) return JNI_FALSE;
+    g_renderer = lorie_renderer_create();
+    if (!g_renderer || lorie_renderer_init(g_renderer) != 0) goto fail_cmd;
+    g_compositor->renderer = g_renderer;
+    if (lorie_renderer_has_dmabuf_import(g_renderer)) {
+        lorie_compositor_create_dmabuf_global(g_compositor);
+    }
+
+    /* Register clipboard callback for Wayland→Android forwarding */
+    if (g_compositor->clipboard) {
+        lorie_clipboard_set_text_callback(g_compositor->clipboard, clipboard_callback, NULL);
+    }
+
+    if (lorie_setup_wayland_runtime_dir() != 0) goto fail_cmd;
+    const char *wayland_display = getenv("WAYLAND_DISPLAY");
+    lorie_compositor_set_socket_name(g_compositor,
+        wayland_display ? wayland_display : "wayland-0");
+
+    if (lorie_compositor_start(g_compositor) != 0) goto fail_cmd;
+    return JNI_TRUE;
+fail_cmd:
+    if (g_renderer) {
+        lorie_renderer_fini(g_renderer);
+        lorie_renderer_destroy(g_renderer);
+        g_renderer = NULL;
+    }
+    lorie_compositor_destroy(g_compositor);
+    g_compositor = NULL;
+    if (g_lorie_view) {
+        JNIEnv *env2 = NULL;
+        if ((*g_jvm)->GetEnv(g_jvm, (void**)&env2, JNI_VERSION_1_6) == JNI_OK) {
+            (*env2)->DeleteGlobalRef(env2, g_lorie_view);
+        }
+        g_lorie_view = NULL;
+    }
+    g_jvm = NULL;
+    return JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_termux_x11_WaylandCmdEntryPoint_stop(JNIEnv *env, jclass clazz) {
+    (void)env; (void)clazz;
+    if (g_compositor) {
+        g_compositor->renderer = NULL;
+        lorie_compositor_stop(g_compositor);
+        lorie_compositor_destroy(g_compositor);
+        g_compositor = NULL;
+    }
+    if (g_renderer) {
+        lorie_renderer_fini(g_renderer);
+        lorie_renderer_destroy(g_renderer);
+        g_renderer = NULL;
+    }
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_termux_x11_WaylandCmdEntryPoint_connected(JNIEnv *env, jclass clazz) {
+    (void)env; (void)clazz;
+    return (g_compositor && g_compositor->running) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_termux_x11_WaylandCmdEntryPoint_getWaylandConnection(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    return NULL;
+}
+
+JNIEXPORT void JNICALL
+Java_com_termux_x11_WaylandCmdEntryPoint_listenForConnections(JNIEnv *env, jobject thiz) {
+    (void)env; (void)thiz;
+    /* No-op for PR 1/2; Wayland compositor runs in Activity process.
+       The command process does not own the Wayland socket.
+       Future PR 3 may add IPC bridge logic here. */
 }
