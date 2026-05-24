@@ -270,7 +270,7 @@ struct lorie_compositor *lorie_compositor_create(void) {
         goto fail_globals;
     }
 
-    c->input = lorie_input_init(c->display);
+    c->input = lorie_input_init(c);
     if (!c->input) {
         LOGE("Failed to create input");
         goto fail_globals;

@@ -8,6 +8,11 @@
 
 struct lorie_surface;
 
+/* Device resource wrappers (defined in seat.c, exposed here for input.c iteration) */
+struct lorie_pointer { struct wl_list link; struct wl_resource *r; };
+struct lorie_keyboard { struct wl_list link; struct wl_resource *r; };
+struct lorie_touch { struct wl_list link; struct wl_resource *r; };
+
 #define LORIE_INPUT_QUEUE_SIZE 256
 
 enum {
@@ -46,9 +51,10 @@ struct lorie_input {
     int queue_tail;
     bool pointer_dirty;
     bool touch_dirty;
+    struct lorie_compositor *compositor;
 };
 
-struct lorie_input *lorie_input_init(struct wl_display *display);
+struct lorie_input *lorie_input_init(struct lorie_compositor *compositor);
 void lorie_input_destroy(struct lorie_input *input);
 void lorie_input_pointer_motion(struct lorie_input *input, float x, float y);
 void lorie_input_pointer_button(struct lorie_input *input, uint32_t button, uint32_t pressed);
@@ -57,5 +63,8 @@ void lorie_input_touch_down(struct lorie_input *input, uint32_t id, float x, flo
 void lorie_input_touch_up(struct lorie_input *input, uint32_t id);
 void lorie_input_touch_motion(struct lorie_input *input, uint32_t id, float x, float y);
 int lorie_input_dispatch(void *data);
+
+/* Called from surface destruction to avoid dangling focus pointers */
+void lorie_input_clear_focus_for_surface(struct lorie_input *input, struct lorie_surface *surface);
 
 #endif

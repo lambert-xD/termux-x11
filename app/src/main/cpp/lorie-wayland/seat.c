@@ -2,10 +2,6 @@
 #include "compositor.h"
 #include <stdlib.h>
 
-struct lorie_pointer { struct wl_list link; struct wl_resource *r; };
-struct lorie_keyboard { struct wl_list link; struct wl_resource *r; };
-struct lorie_touch { struct wl_list link; struct wl_resource *r; };
-
 static void pd(struct wl_resource *res) {
     struct lorie_pointer *p = wl_resource_get_user_data(res);
     if (p) { wl_list_remove(&p->link); free(p); }

@@ -9,16 +9,17 @@
 
 static void seat_bind(struct wl_client*, void*, uint32_t, uint32_t);
 
-struct lorie_input *lorie_input_init(struct wl_display *d) {
+struct lorie_input *lorie_input_init(struct lorie_compositor *c) {
     struct lorie_input *in = calloc(1, sizeof(*in));
     if (!in) return NULL;
-    in->display = d;
-    in->loop = wl_display_get_event_loop(d);
+    in->display = c->display;
+    in->compositor = c;
+    in->loop = wl_display_get_event_loop(c->display);
     wl_list_init(&in->pointers);
     wl_list_init(&in->keyboards);
     wl_list_init(&in->touches);
     pthread_mutex_init(&in->queue_lock, NULL);
-    in->seat_global = wl_global_create(d, &wl_seat_interface, 7, in, seat_bind);
+    in->seat_global = wl_global_create(c->display, &wl_seat_interface, 7, in, seat_bind);
     if (!in->seat_global) { free(in); return NULL; }
     in->timer = wl_event_loop_add_timer(in->loop, lorie_input_dispatch, in);
     wl_event_source_timer_update(in->timer, 16);
@@ -75,23 +76,134 @@ void lorie_input_touch_motion(struct lorie_input *in, uint32_t id, float x, floa
 
 static void pframe(struct lorie_input *in) {
     if (!in->pointer_dirty) return;
-    struct wl_resource *r;
-    wl_list_for_each(r, &in->pointers, link)
-        if (wl_resource_get_version(r) >= WL_POINTER_FRAME_SINCE_VERSION)
-            wl_pointer_send_frame(r);
+    struct lorie_pointer *p;
+    wl_list_for_each(p, &in->pointers, link)
+        if (wl_resource_get_version(p->r) >= WL_POINTER_FRAME_SINCE_VERSION)
+            wl_pointer_send_frame(p->r);
     in->pointer_dirty = 0;
 }
 
 static void tframe(struct lorie_input *in) {
     if (!in->touch_dirty) return;
-    struct wl_resource *r;
-    wl_list_for_each(r, &in->touches, link)
-        if (wl_resource_get_version(r) >= WL_TOUCH_FRAME_SINCE_VERSION)
-            wl_touch_send_frame(r);
+    struct lorie_touch *t;
+    wl_list_for_each(t, &in->touches, link)
+        if (wl_resource_get_version(t->r) >= WL_TOUCH_FRAME_SINCE_VERSION)
+            wl_touch_send_frame(t->r);
     in->touch_dirty = 0;
 }
 
 static uint32_t ns(struct lorie_input *in) { return wl_display_next_serial(in->display); }
+
+/* ------------------------------------------------------------------ */
+/* Focus helpers                                                       */
+/* ------------------------------------------------------------------ */
+
+static struct lorie_surface *find_surface_at_point(struct lorie_compositor *c, float x, float y) {
+    if (!c) return NULL;
+    struct lorie_surface *s;
+    wl_list_for_each(s, &c->surfaces, link) {
+        if (s->resource && s->logical_width > 0 && s->logical_height > 0 &&
+            x >= s->x && x < s->x + s->logical_width &&
+            y >= s->y && y < s->y + s->logical_height) {
+            return s;
+        }
+    }
+    return NULL;
+}
+
+static struct wl_client *focus_client(struct lorie_surface *focus) {
+    return (focus && focus->resource) ? wl_resource_get_client(focus->resource) : NULL;
+}
+
+static void send_pointer_leave(struct lorie_input *in, struct lorie_surface *old_focus) {
+    struct wl_client *client = focus_client(old_focus);
+    if (!client) return;
+    uint32_t serial = ns(in);
+    struct lorie_pointer *p;
+    wl_list_for_each(p, &in->pointers, link) {
+        if (wl_resource_get_client(p->r) == client)
+            wl_pointer_send_leave(p->r, serial, old_focus->resource);
+    }
+}
+
+static void send_pointer_enter(struct lorie_input *in, struct lorie_surface *new_focus, float x, float y) {
+    struct wl_client *client = focus_client(new_focus);
+    if (!client) return;
+    uint32_t serial = ns(in);
+    wl_fixed_t sx = wl_fixed_from_double(x - new_focus->x);
+    wl_fixed_t sy = wl_fixed_from_double(y - new_focus->y);
+    struct lorie_pointer *p;
+    wl_list_for_each(p, &in->pointers, link) {
+        if (wl_resource_get_client(p->r) == client)
+            wl_pointer_send_enter(p->r, serial, new_focus->resource, sx, sy);
+    }
+}
+
+static void send_keyboard_leave(struct lorie_input *in, struct lorie_surface *old_focus) {
+    struct wl_client *client = focus_client(old_focus);
+    if (!client) return;
+    uint32_t serial = ns(in);
+    struct lorie_keyboard *k;
+    wl_list_for_each(k, &in->keyboards, link) {
+        if (wl_resource_get_client(k->r) == client)
+            wl_keyboard_send_leave(k->r, serial, old_focus->resource);
+    }
+}
+
+static void send_keyboard_enter(struct lorie_input *in, struct lorie_surface *new_focus) {
+    struct wl_client *client = focus_client(new_focus);
+    if (!client) return;
+    uint32_t serial = ns(in);
+    struct wl_array keys;
+    wl_array_init(&keys);
+    struct lorie_keyboard *k;
+    wl_list_for_each(k, &in->keyboards, link) {
+        if (wl_resource_get_client(k->r) == client)
+            wl_keyboard_send_enter(k->r, serial, new_focus->resource, &keys);
+    }
+    wl_array_release(&keys);
+}
+
+static void update_pointer_focus(struct lorie_input *in, float x, float y) {
+    struct lorie_surface *new_focus = find_surface_at_point(in->compositor, x, y);
+    if (in->pointer_focus == new_focus) return;
+    if (in->pointer_focus) send_pointer_leave(in, in->pointer_focus);
+    in->pointer_focus = new_focus;
+    if (new_focus) send_pointer_enter(in, new_focus, x, y);
+
+    /* Keyboard focus follows pointer focus for MVP */
+    if (in->keyboard_focus != new_focus) {
+        if (in->keyboard_focus) send_keyboard_leave(in, in->keyboard_focus);
+        in->keyboard_focus = new_focus;
+        if (new_focus) send_keyboard_enter(in, new_focus);
+    }
+}
+
+static void update_touch_focus(struct lorie_input *in, float x, float y) {
+    struct lorie_surface *new_focus = find_surface_at_point(in->compositor, x, y);
+    if (new_focus) in->touch_focus = new_focus;
+}
+
+/* ------------------------------------------------------------------ */
+/* Public: clear focus when a surface is destroyed                    */
+/* ------------------------------------------------------------------ */
+
+void lorie_input_clear_focus_for_surface(struct lorie_input *in, struct lorie_surface *s) {
+    if (!in || !s) return;
+    if (in->pointer_focus == s) {
+        send_pointer_leave(in, s);
+        in->pointer_focus = NULL;
+    }
+    if (in->keyboard_focus == s) {
+        send_keyboard_leave(in, s);
+        in->keyboard_focus = NULL;
+    }
+    if (in->touch_focus == s) in->touch_focus = NULL;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dispatch                                                            */
+/* ------------------------------------------------------------------ */
 
 int lorie_input_dispatch(void *data) {
     struct lorie_input *in = data;
@@ -101,34 +213,72 @@ int lorie_input_dispatch(void *data) {
     while (in->queue_head != in->queue_tail && n < LORIE_INPUT_QUEUE_SIZE)
         ev[n++] = in->queue[in->queue_head], in->queue_head = (in->queue_head + 1) % LORIE_INPUT_QUEUE_SIZE;
     pthread_mutex_unlock(&in->queue_lock);
+
     for (int i = 0; i < n; i++) {
         struct lorie_input_event *e = &ev[i];
-        struct wl_resource *r;
         switch (e->type) {
         case LORIE_INPUT_POINTER_MOTION:
-            wl_list_for_each(r, &in->pointers, link)
-                wl_pointer_send_motion(r, ns(in), wl_fixed_from_double(e->motion.x), wl_fixed_from_double(e->motion.y));
+            update_pointer_focus(in, e->motion.x, e->motion.y);
+            if (in->pointer_focus) {
+                struct wl_client *client = focus_client(in->pointer_focus);
+                struct lorie_pointer *p;
+                wl_list_for_each(p, &in->pointers, link) {
+                    if (wl_resource_get_client(p->r) == client)
+                        wl_pointer_send_motion(p->r, ns(in), wl_fixed_from_double(e->motion.x - in->pointer_focus->x), wl_fixed_from_double(e->motion.y - in->pointer_focus->y));
+                }
+            }
             in->pointer_dirty = 1; break;
         case LORIE_INPUT_POINTER_BUTTON:
-            wl_list_for_each(r, &in->pointers, link)
-                wl_pointer_send_button(r, 0, ns(in), e->button.button, e->button.state);
+            if (in->pointer_focus) {
+                struct wl_client *client = focus_client(in->pointer_focus);
+                struct lorie_pointer *p;
+                wl_list_for_each(p, &in->pointers, link) {
+                    if (wl_resource_get_client(p->r) == client)
+                        wl_pointer_send_button(p->r, 0, ns(in), e->button.button, e->button.state);
+                }
+            }
             in->pointer_dirty = 1; break;
         case LORIE_INPUT_KEYBOARD_KEY: {
             uint32_t kc = e->key.key < 304 ? android_to_linux_keycode[e->key.key] : 0;
-            wl_list_for_each(r, &in->keyboards, link)
-                wl_keyboard_send_key(r, ns(in), 0, kc, e->key.state);
+            if (in->keyboard_focus) {
+                struct wl_client *client = focus_client(in->keyboard_focus);
+                struct lorie_keyboard *k;
+                wl_list_for_each(k, &in->keyboards, link) {
+                    if (wl_resource_get_client(k->r) == client)
+                        wl_keyboard_send_key(k->r, ns(in), 0, kc, e->key.state);
+                }
+            }
             break; }
         case LORIE_INPUT_TOUCH_DOWN:
-            wl_list_for_each(r, &in->touches, link)
-                wl_touch_send_down(r, 0, ns(in), NULL, e->touch.id, wl_fixed_from_double(e->touch.x), wl_fixed_from_double(e->touch.y));
+            update_touch_focus(in, e->touch.x, e->touch.y);
+            if (in->touch_focus) {
+                struct wl_client *client = focus_client(in->touch_focus);
+                struct lorie_touch *t;
+                wl_list_for_each(t, &in->touches, link) {
+                    if (wl_resource_get_client(t->r) == client)
+                        wl_touch_send_down(t->r, 0, ns(in), NULL, e->touch.id, wl_fixed_from_double(e->touch.x), wl_fixed_from_double(e->touch.y));
+                }
+            }
             in->touch_dirty = 1; break;
         case LORIE_INPUT_TOUCH_UP:
-            wl_list_for_each(r, &in->touches, link)
-                wl_touch_send_up(r, ns(in), 0, e->touch.id);
+            if (in->touch_focus) {
+                struct wl_client *client = focus_client(in->touch_focus);
+                struct lorie_touch *t;
+                wl_list_for_each(t, &in->touches, link) {
+                    if (wl_resource_get_client(t->r) == client)
+                        wl_touch_send_up(t->r, ns(in), 0, e->touch.id);
+                }
+            }
             in->touch_dirty = 1; break;
         case LORIE_INPUT_TOUCH_MOTION:
-            wl_list_for_each(r, &in->touches, link)
-                wl_touch_send_motion(r, ns(in), e->touch.id, wl_fixed_from_double(e->touch.x), wl_fixed_from_double(e->touch.y));
+            if (in->touch_focus) {
+                struct wl_client *client = focus_client(in->touch_focus);
+                struct lorie_touch *t;
+                wl_list_for_each(t, &in->touches, link) {
+                    if (wl_resource_get_client(t->r) == client)
+                        wl_touch_send_motion(t->r, ns(in), e->touch.id, wl_fixed_from_double(e->touch.x), wl_fixed_from_double(e->touch.y));
+                }
+            }
             in->touch_dirty = 1; break;
         }
     }

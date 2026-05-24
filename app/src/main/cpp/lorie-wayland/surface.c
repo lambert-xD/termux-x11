@@ -1,6 +1,7 @@
 /* Lorie Wayland Compositor — Surface, Region, Subcompositor */
 
 #include "compositor.h"
+#include "input.h"
 #include "renderer.h"
 #include "../../lorie/buffer.h"
 #include <wayland-server-protocol.h>
@@ -236,6 +237,8 @@ static void surface_handle_resource_destroy(struct wl_resource *resource) {
         wl_resource_destroy(cb->resource);
     }
     pixman_region32_fini(&s->damage);
+    if (s->compositor && s->compositor->input)
+        lorie_input_clear_focus_for_surface(s->compositor->input, s);
     if (s->xdg_surface) {
         s->xdg_surface->surface = NULL;
         s->xdg_surface = NULL;
@@ -278,6 +281,8 @@ void lorie_surface_destroy_internal(struct lorie_surface *s) {
     if (s->resource)
         wl_resource_destroy(s->resource);
     else {
+        if (s->compositor && s->compositor->input)
+            lorie_input_clear_focus_for_surface(s->compositor->input, s);
         if (s->xdg_surface) {
             s->xdg_surface->surface = NULL;
             s->xdg_surface = NULL;
