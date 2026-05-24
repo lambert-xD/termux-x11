@@ -21,7 +21,7 @@ static const char lorie_xkb_keymap[] =
 "<FK01>=67; <FK02>=68; <FK03>=69; <FK04>=70; <FK05>=71; <FK06>=72; <FK07>=73; <FK08>=74; <FK09>=75; <FK10>=76; <NMLK>=77; <SCLK>=78;\n"
 "<KP7>=79; <KP8>=80; <KP9>=81; <KPSU>=82; <KP4>=83; <KP5>=84; <KP6>=85; <KPAD>=86; <KP1>=87; <KP2>=88; <KP3>=89; <KP0>=90; <KPDL>=91;\n"
 "<FK11>=95; <FK12>=96; <RCTL>=105; <RALT>=108; <HOME>=110; <UP>=111; <PGUP>=112; <LEFT>=113; <RGHT>=114; <END>=115; <DOWN>=116; <PGDN>=117; <INS>=118; <DELE>=119;\n"
-"<LWIN>=133; <RWIN>=134; <COMP>=135; <MENU>=143; };\n"
+"<LWIN>=133; <RWIN>=134; <COMP>=135; <MENU>=147; };\n"
 "xkb_types \"complete\" { type \"ONE_LEVEL\" { modifiers=none; map[none]=1; }; type \"TWO_LEVEL\" { modifiers=Shift; map[none]=1; map[Shift]=2; }; };\n"
 "xkb_compat \"complete\" { };\n"
 "xkb_symbols \"us\" {\n"
@@ -136,7 +136,7 @@ int android_to_linux_keycode[304] = {
     [ 75  /* ANDROID_KEYCODE_APOSTROPHE */] = KEY_APOSTROPHE,
     [ 76  /* ANDROID_KEYCODE_SLASH */] = KEY_SLASH,
     [ 81  /* ANDROID_KEYCODE_PLUS */] = KEY_KPPLUS,
-    [ 82  /* ANDROID_KEYCODE_MENU */] = KEY_CONTEXT_MENU,
+    [ 82  /* ANDROID_KEYCODE_MENU */] = KEY_MENU,
     [ 84  /* ANDROID_KEYCODE_SEARCH */] = KEY_SEARCH,
     [ 85  /* ANDROID_KEYCODE_MEDIA_PLAY_PAUSE */] = KEY_PLAYPAUSE,
     [ 86  /* ANDROID_KEYCODE_MEDIA_STOP */] = KEY_STOP_RECORD,

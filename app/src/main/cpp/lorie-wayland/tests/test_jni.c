@@ -74,6 +74,22 @@ static void test_keycode_bounds_checked(void) {
     ASSERT_FALSE(lorie_keycode_valid(10000));
 }
 
+/* android_to_linux_keycode is defined in keymap.c */
+extern int android_to_linux_keycode[304];
+
+static void test_keycode_a_maps_to_linux_30(void) {
+    ASSERT_EQ_INT(30, android_to_linux_keycode[29]);
+}
+
+static void test_keycode_menu_maps_to_linux_139(void) {
+    ASSERT_EQ_INT(139, android_to_linux_keycode[82]);
+}
+
+static void test_keycode_unmapped_is_zero(void) {
+    ASSERT_EQ_INT(0, android_to_linux_keycode[18]);
+    ASSERT_EQ_INT(0, android_to_linux_keycode[200]);
+}
+
 static void test_wayland_runtime_dir_prefers_xdg_runtime_dir(void) {
     char dir[] = "/tmp/lorie_xdg_runtime_XXXXXX";
     ASSERT_NOT_NULL(mkdtemp(dir));
@@ -124,6 +140,9 @@ int lorie_test_jni_suite(struct lorie_test_suite* suite) {
     SUITE_ADD(suite, test_jni_native_methods_registered);
     SUITE_ADD(suite, test_clipboard_size_capped);
     SUITE_ADD(suite, test_keycode_bounds_checked);
+    SUITE_ADD(suite, test_keycode_a_maps_to_linux_30);
+    SUITE_ADD(suite, test_keycode_menu_maps_to_linux_139);
+    SUITE_ADD(suite, test_keycode_unmapped_is_zero);
     SUITE_ADD(suite, test_wayland_runtime_dir_prefers_xdg_runtime_dir);
     SUITE_ADD(suite, test_wayland_runtime_dir_falls_back_to_tmpdir);
     SUITE_ADD(suite, test_wayland_runtime_dir_preserves_wayland_display);

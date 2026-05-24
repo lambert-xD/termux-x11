@@ -122,6 +122,41 @@ static void test_touch_focus_set_on_down(void) {
     wl_client_destroy(client);
 }
 
+static void test_keyboard_dispatch_android_keycode(void) {
+    ASSERT_EQ_INT(0, lorie_compositor_start(g_comp));
+    struct lorie_input *in = g_comp->input;
+    struct wl_client *client = make_client();
+    ASSERT_NOT_NULL(client);
+    struct lorie_surface *s = make_surface(client, 0, 0, 100, 100);
+    ASSERT_NOT_NULL(s);
+    lorie_input_pointer_motion(in, 50.0f, 50.0f);
+    lorie_input_dispatch(in);
+    ASSERT_EQ_PTR(s, in->keyboard_focus);
+    lorie_input_keyboard_key(in, 29, 1);
+    lorie_input_dispatch(in);
+    lorie_input_keyboard_key(in, 29, 0);
+    lorie_input_dispatch(in);
+    lorie_surface_destroy_internal(s);
+    wl_client_destroy(client);
+}
+
+static void test_keyboard_dispatch_rejects_unmapped(void) {
+    ASSERT_EQ_INT(0, lorie_compositor_start(g_comp));
+    struct lorie_input *in = g_comp->input;
+    struct wl_client *client = make_client();
+    ASSERT_NOT_NULL(client);
+    struct lorie_surface *s = make_surface(client, 0, 0, 100, 100);
+    ASSERT_NOT_NULL(s);
+    lorie_input_pointer_motion(in, 50.0f, 50.0f);
+    lorie_input_dispatch(in);
+    lorie_input_keyboard_key(in, 304, 1);
+    lorie_input_dispatch(in);
+    lorie_input_keyboard_key(in, 303, 1);
+    lorie_input_dispatch(in);
+    lorie_surface_destroy_internal(s);
+    wl_client_destroy(client);
+}
+
 static void test_no_crash_when_no_focus(void) {
     ASSERT_EQ_INT(0, lorie_compositor_start(g_comp));
     struct lorie_input *in = lorie_input_init(g_comp);
@@ -145,6 +180,8 @@ int lorie_test_input_suite(struct lorie_test_suite* suite) {
     SUITE_ADD(suite, test_keyboard_follows_pointer_focus);
     SUITE_ADD(suite, test_focus_cleared_on_surface_destroy);
     SUITE_ADD(suite, test_touch_focus_set_on_down);
+    SUITE_ADD(suite, test_keyboard_dispatch_android_keycode);
+    SUITE_ADD(suite, test_keyboard_dispatch_rejects_unmapped);
     SUITE_ADD(suite, test_no_crash_when_no_focus);
     return 0;
 }

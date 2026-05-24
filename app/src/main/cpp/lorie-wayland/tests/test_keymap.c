@@ -9,7 +9,7 @@ static void test_keymap_create_fd(void) {
     ASSERT_TRUE(fd >= 0);
     ASSERT_TRUE(size > 0);
 
-    char buf[1024];
+    char buf[4096];
     ssize_t n = read(fd, buf, sizeof(buf) - 1);
     ASSERT_TRUE(n > 0);
     buf[n] = '\0';
@@ -17,6 +17,7 @@ static void test_keymap_create_fd(void) {
     ASSERT_TRUE(strstr(buf, "<ESC>=9") != NULL);
     ASSERT_TRUE(strstr(buf, "<AE01>=10") != NULL);
     ASSERT_TRUE(strstr(buf, "<AC01>=38") != NULL);
+    ASSERT_TRUE(strstr(buf, "<MENU>=147") != NULL);
 
     ASSERT_EQ_INT(0, close(fd));
 }

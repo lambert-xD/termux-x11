@@ -239,7 +239,9 @@ int lorie_input_dispatch(void *data) {
             }
             in->pointer_dirty = 1; break;
         case LORIE_INPUT_KEYBOARD_KEY: {
-            uint32_t kc = e->key.key < 304 ? android_to_linux_keycode[e->key.key] : 0;
+            if (e->key.key >= 304) break;
+            uint32_t kc = android_to_linux_keycode[e->key.key];
+            if (kc == 0) break;
             if (in->keyboard_focus) {
                 struct wl_client *client = focus_client(in->keyboard_focus);
                 struct lorie_keyboard *k;

@@ -157,27 +157,15 @@ Java_com_termux_x11_LorieWaylandView_sendKeyEvent(JNIEnv *env, jobject thiz,
     (void)env; (void)thiz; (void)scanCode;
     if (!g_compositor || !g_compositor->input) return JNI_FALSE;
     if (!lorie_keycode_valid(keyCode)) return JNI_FALSE;
-    uint32_t code = (uint32_t)android_to_linux_keycode[keyCode];
-    lorie_input_keyboard_key(g_compositor->input, code + 8, down ? 1 : 0);
+    lorie_input_keyboard_key(g_compositor->input, (uint32_t)keyCode, down ? 1 : 0);
     return JNI_TRUE;
 }
 
 JNIEXPORT void JNICALL
 Java_com_termux_x11_LorieWaylandView_sendTextEvent(JNIEnv *env, jobject thiz,
                                                     jbyteArray text) {
-    (void)thiz;
-    if (!g_compositor || !g_compositor->input || !text) return;
-    jsize length = (*env)->GetArrayLength(env, text);
-    if (length <= 0) return;
-    jbyte *bytes = (*env)->GetByteArrayElements(env, text, NULL);
-    if (!bytes) return;
-    for (jsize i = 0; i < length; i++) {
-        uint32_t c = (uint8_t)bytes[i];
-        if (c < 32) continue;
-        lorie_input_keyboard_key(g_compositor->input, c, 1);
-        lorie_input_keyboard_key(g_compositor->input, c, 0);
-    }
-    (*env)->ReleaseByteArrayElements(env, text, bytes, JNI_ABORT);
+    (void)env; (void)thiz; (void)text;
+    LOGI("sendTextEvent: text input deferred — proper compose/xkbcommon integration needed");
 }
 
 JNIEXPORT void JNICALL
