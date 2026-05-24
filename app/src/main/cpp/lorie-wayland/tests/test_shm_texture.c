@@ -7,6 +7,7 @@
 #include "lorie_test.h"
 #include "../compositor.h"
 #include "../renderer.h"
+#include "../../lorie/buffer.h"
 
 static void test_surface_buffer_null_initially(void) {
     struct lorie_surface *s = lorie_surface_create_internal(NULL, NULL, 0);
@@ -54,11 +55,35 @@ static void test_surface_commit_swaps_buffer_resource(void) {
     lorie_surface_destroy_internal(s);
 }
 
+static void test_regular_buffer_properties(void) {
+    LorieBuffer *b = LorieBuffer_allocate(64, 32, AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM, LORIEBUFFER_REGULAR);
+    ASSERT_NOT_NULL(b);
+    const LorieBuffer_Desc *d = LorieBuffer_description(b);
+    ASSERT_EQ_INT(LORIEBUFFER_REGULAR, d->type);
+    ASSERT_EQ_INT(64, d->width);
+    ASSERT_EQ_INT(32, d->height);
+    ASSERT_EQ_INT(64, d->stride);
+    ASSERT_NOT_NULL(d->data);
+    LorieBuffer_release(b);
+}
+
+static void test_attach_to_gl_no_context_safe(void) {
+    /* Without a current EGL context attachToGL returns early; calling it
+     * repeatedly must not crash or leak (texture gen is skipped). */
+    LorieBuffer *b = LorieBuffer_allocate(4, 4, AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM, LORIEBUFFER_REGULAR);
+    ASSERT_NOT_NULL(b);
+    LorieBuffer_attachToGL(b);
+    LorieBuffer_attachToGL(b);
+    LorieBuffer_release(b);
+}
+
 int lorie_test_shm_texture_suite(struct lorie_test_suite* suite) {
     lorie_suite_init(suite, "shm_texture", NULL, NULL);
     SUITE_ADD(suite, test_surface_buffer_null_initially);
     SUITE_ADD(suite, test_surface_destroy_with_null_buffer_safe);
     SUITE_ADD(suite, test_renderer_skips_surface_without_buffer);
     SUITE_ADD(suite, test_surface_commit_swaps_buffer_resource);
+    SUITE_ADD(suite, test_regular_buffer_properties);
+    SUITE_ADD(suite, test_attach_to_gl_no_context_safe);
     return 0;
 }

@@ -36,7 +36,7 @@ LorieBuffer* LorieBuffer_allocate(int32_t width, int32_t height, int8_t format, 
     b->refcount = 1;
     b->desc.width = width;
     b->desc.height = height;
-    b->desc.stride = width * 4;
+    b->desc.stride = width;
     b->desc.format = format;
     b->desc.type = 1; /* LORIEBUFFER_REGULAR */
     b->desc.data = (uint8_t*)b + sizeof(TestLorieBuffer);
