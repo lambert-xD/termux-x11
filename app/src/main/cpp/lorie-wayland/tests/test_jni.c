@@ -11,11 +11,14 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 /* Helpers exported from wayland-activity.c */
 extern int lorie_clipboard_validate_size(uint32_t count);
 extern int lorie_keycode_valid(int key_code);
 extern int lorie_setup_wayland_runtime_dir(void);
+extern int lorie_wayland_socket_ready(void);
 extern const int lorie_wayland_native_method_count;
 
 struct env_snapshot {
@@ -135,6 +138,40 @@ static void test_wayland_runtime_dir_preserves_wayland_display(void) {
     rmdir(dir);
 }
 
+static void test_socket_ready_when_socket_exists(void) {
+    char dir[] = "/tmp/lorie_socket_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(dir));
+    setenv("XDG_RUNTIME_DIR", dir, 1);
+    setenv("WAYLAND_DISPLAY", "wayland-test", 1);
+
+    char sock[1024];
+    snprintf(sock, sizeof(sock), "%s/wayland-test", dir);
+    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+    ASSERT_TRUE(fd >= 0);
+    struct sockaddr_un addr = {0};
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, sock, sizeof(addr.sun_path) - 1);
+    int bound = bind(fd, (struct sockaddr *)&addr, sizeof(addr));
+    ASSERT_TRUE(bound == 0);
+
+    ASSERT_TRUE(lorie_wayland_socket_ready());
+
+    close(fd);
+    unlink(sock);
+    rmdir(dir);
+}
+
+static void test_socket_ready_when_missing(void) {
+    char dir[] = "/tmp/lorie_nosock_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(dir));
+    setenv("XDG_RUNTIME_DIR", dir, 1);
+    setenv("WAYLAND_DISPLAY", "wayland-missing", 1);
+
+    ASSERT_FALSE(lorie_wayland_socket_ready());
+
+    rmdir(dir);
+}
+
 int lorie_test_jni_suite(struct lorie_test_suite* suite) {
     lorie_suite_init(suite, "jni", test_jni_setup, test_jni_teardown);
     SUITE_ADD(suite, test_jni_native_methods_registered);
@@ -146,5 +183,7 @@ int lorie_test_jni_suite(struct lorie_test_suite* suite) {
     SUITE_ADD(suite, test_wayland_runtime_dir_prefers_xdg_runtime_dir);
     SUITE_ADD(suite, test_wayland_runtime_dir_falls_back_to_tmpdir);
     SUITE_ADD(suite, test_wayland_runtime_dir_preserves_wayland_display);
+    SUITE_ADD(suite, test_socket_ready_when_socket_exists);
+    SUITE_ADD(suite, test_socket_ready_when_missing);
     return 0;
 }

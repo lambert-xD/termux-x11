@@ -68,6 +68,11 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
+        <receiver android:name=".WaylandActivity$StartReceiver" android:exported="true" tools:ignore="ExportedReceiver" android:enabled="true">
+            <intent-filter>
+                <action android:name="com.termux.x11.WaylandCmdEntryPoint.ACTION_START" />
+            </intent-filter>
+        </receiver>
         <receiver android:name=".LoriePreferences$Receiver" android:exported="true" tools:ignore="ExportedReceiver" android:enabled="true">
             <intent-filter>
                 <action android:name="com.termux.x11.CHANGE_PREFERENCE" />
