@@ -164,12 +164,7 @@ void surface_commit(struct wl_client *client,
                                        0, 0, s->logical_width, s->logical_height);
     }
 
-    struct lorie_frame_callback *cb, *tmp;
-    wl_list_for_each_safe(cb, tmp, &s->frame_callbacks, link) {
-        wl_callback_send_done(cb->resource, 0);
-        wl_resource_destroy(cb->resource);
-    }
-    wl_list_init(&s->frame_callbacks);
+    /* Frame callbacks are fired by the renderer; do not duplicate here. */
 
     lorie_xdg_surface_handle_commit(s, client);
     (void)client;

@@ -226,6 +226,81 @@ static void test_xdg_toplevel_destroy_cleans_role(void) {
     close(fds[1]);
 }
 
+/* Test 12: popup destroy cleans role pointer */
+static void test_popup_destroy_cleans_role(void) {
+    int ret = lorie_compositor_start(g_comp);
+    ASSERT_EQ_INT(0, ret);
+
+    int fds[2];
+    ret = socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds);
+    ASSERT_EQ_INT(0, ret);
+
+    struct wl_client *client = wl_client_create(g_comp->display, fds[0]);
+    ASSERT_NOT_NULL(client);
+
+    struct lorie_xdg_surface *xdg = calloc(1, sizeof(*xdg));
+    ASSERT_NOT_NULL(xdg);
+    struct lorie_xdg_popup *popup = calloc(1, sizeof(*popup));
+    ASSERT_NOT_NULL(popup);
+    popup->xdg_surface = xdg;
+
+    struct wl_resource *popup_res = wl_resource_create(client, &xdg_popup_interface, 1, 400);
+    ASSERT_NOT_NULL(popup_res);
+    popup->resource = popup_res;
+    wl_resource_set_implementation(popup_res, NULL, popup, xdg_popup_handle_resource_destroy);
+    xdg->role = popup_res;
+
+    wl_resource_destroy(popup_res);
+    ASSERT_EQ_PTR(NULL, xdg->role);
+
+    free(xdg);
+    wl_client_destroy(client);
+    close(fds[1]);
+}
+
+/* Test 13: popup configure on first commit */
+static void test_popup_configure_on_commit(void) {
+    int ret = lorie_compositor_start(g_comp);
+    ASSERT_EQ_INT(0, ret);
+
+    int fds[2];
+    ret = socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, fds);
+    ASSERT_EQ_INT(0, ret);
+
+    struct wl_client *client = wl_client_create(g_comp->display, fds[0]);
+    ASSERT_NOT_NULL(client);
+
+    struct lorie_surface *s = lorie_surface_create_internal(g_comp, client, 100);
+    ASSERT_NOT_NULL(s);
+
+    struct lorie_xdg_surface *xdg = calloc(1, sizeof(*xdg));
+    ASSERT_NOT_NULL(xdg);
+    xdg->surface = s;
+    s->xdg_surface = xdg;
+
+    struct lorie_xdg_popup *popup = calloc(1, sizeof(*popup));
+    ASSERT_NOT_NULL(popup);
+    popup->xdg_surface = xdg;
+
+    struct wl_resource *popup_res = wl_resource_create(client, &xdg_popup_interface, 1, 401);
+    ASSERT_NOT_NULL(popup_res);
+    popup->resource = popup_res;
+    wl_resource_set_implementation(popup_res, NULL, popup, xdg_popup_handle_resource_destroy);
+    xdg->role = popup_res;
+
+    ASSERT_EQ_INT(0, popup->configured);
+    lorie_xdg_surface_handle_commit(s, client);
+    ASSERT_EQ_INT(1, popup->configured);
+
+    s->xdg_surface = NULL;
+    wl_resource_destroy(popup_res);
+    ASSERT_EQ_PTR(NULL, xdg->role);
+    free(xdg);
+    lorie_surface_destroy_internal(s);
+    wl_client_destroy(client);
+    close(fds[1]);
+}
+
 /* Test 10: linux_dmabuf global exists */
 static void test_dmabuf_global_exists(void) {
     int ret = lorie_compositor_start(g_comp);
@@ -253,6 +328,8 @@ int lorie_test_protocols_suite(struct lorie_test_suite *suite) {
     SUITE_ADD(suite, test_xdg_surface_unconfigured_buffer_error);
     SUITE_ADD(suite, test_xdg_surface_preferred_buffer_scale_sent);
     SUITE_ADD(suite, test_xdg_toplevel_destroy_cleans_role);
+    SUITE_ADD(suite, test_popup_destroy_cleans_role);
+    SUITE_ADD(suite, test_popup_configure_on_commit);
     SUITE_ADD(suite, test_dmabuf_global_exists);
     SUITE_ADD(suite, test_data_device_manager_exists);
     return 0;

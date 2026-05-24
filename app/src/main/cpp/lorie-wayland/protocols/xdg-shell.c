@@ -5,6 +5,7 @@
 #include <string.h>
 
 static const struct xdg_toplevel_interface xdg_toplevel_impl;
+static const struct xdg_popup_interface xdg_popup_impl;
 
 /* Internal: send xdg_surface.configure with a given serial */
 void lorie_xdg_surface_send_configure_internal(struct lorie_xdg_surface *xdg_surf, uint32_t serial) {
@@ -64,6 +65,19 @@ void lorie_xdg_surface_handle_commit(struct lorie_surface *s, struct wl_client *
             }
             wl_array_release(&states);
         }
+    } else if (xdg_surf->role && wl_resource_get_interface(xdg_surf->role) == &xdg_popup_interface) {
+        struct lorie_xdg_popup *popup = wl_resource_get_user_data(xdg_surf->role);
+        if (popup && popup->resource) {
+            int32_t pw = 0, ph = 0;
+            if (s->compositor && !wl_list_empty(&s->compositor->outputs)) {
+                struct lorie_output *out =
+                    wl_container_of(s->compositor->outputs.next, out, link);
+                pw = out->width;
+                ph = out->height;
+            }
+            xdg_popup_send_configure(popup->resource, 0, 0, pw, ph);
+            popup->configured = 1;
+        }
     }
 
     xdg_surf->configured = 1;
@@ -120,6 +134,38 @@ static void xdg_surface_get_toplevel(struct wl_client *client, struct wl_resourc
     xdg_surf->role = toplevel->resource;
 }
 
+static void xdg_popup_destroy(struct wl_client *client, struct wl_resource *resource) {
+    wl_resource_destroy(resource);
+    (void)client;
+}
+
+static void xdg_popup_grab(struct wl_client *client, struct wl_resource *resource,
+                           struct wl_resource *seat, uint32_t serial) {
+    (void)client; (void)resource; (void)seat; (void)serial;
+}
+
+static void xdg_popup_reposition(struct wl_client *client, struct wl_resource *resource,
+                                 struct wl_resource *positioner, uint32_t token) {
+    (void)client; (void)resource; (void)positioner; (void)token;
+}
+
+static const struct xdg_popup_interface xdg_popup_impl = {
+    xdg_popup_destroy,
+    xdg_popup_grab,
+    xdg_popup_reposition,
+};
+
+void xdg_popup_handle_resource_destroy(struct wl_resource *resource) {
+    struct lorie_xdg_popup *popup = wl_resource_get_user_data(resource);
+    if (popup) {
+        if (popup->xdg_surface) {
+            popup->xdg_surface->role = NULL;
+            popup->xdg_surface = NULL;
+        }
+        free(popup);
+    }
+}
+
 static void xdg_surface_get_popup(struct wl_client *client, struct wl_resource *resource,
                                   uint32_t id, struct wl_resource *parent_resource,
                                   struct wl_resource *positioner_resource) {
@@ -132,11 +178,15 @@ static void xdg_surface_get_popup(struct wl_client *client, struct wl_resource *
         wl_resource_post_error(resource, XDG_SURFACE_ERROR_NOT_CONSTRUCTED, "null positioner");
         return;
     }
-    struct wl_resource *popup = wl_resource_create(client, &xdg_popup_interface, 1, id);
+    struct lorie_xdg_popup *popup = calloc(1, sizeof(*popup));
     if (!popup) { wl_client_post_no_memory(client); return; }
-    wl_resource_set_implementation(popup, NULL, xdg_surf, NULL);
-    xdg_surf->role = popup;
-    (void)parent_resource;
+    popup->resource = wl_resource_create(client, &xdg_popup_interface, 1, id);
+    if (!popup->resource) { free(popup); wl_client_post_no_memory(client); return; }
+    wl_resource_set_implementation(popup->resource, &xdg_popup_impl, popup,
+                                   xdg_popup_handle_resource_destroy);
+    popup->xdg_surface = xdg_surf;
+    popup->parent = parent_resource;
+    xdg_surf->role = popup->resource;
 }
 
 static const struct xdg_surface_interface xdg_surface_impl = {
@@ -250,6 +300,13 @@ static void xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
             struct lorie_xdg_toplevel *toplevel = wl_resource_get_user_data(xdg_surf->role);
             if (toplevel)
                 toplevel->xdg_surface = NULL;
+        } else if (xdg_surf->role && wl_resource_get_interface(xdg_surf->role) == &xdg_popup_interface) {
+            struct lorie_xdg_popup *popup = wl_resource_get_user_data(xdg_surf->role);
+            if (popup) {
+                if (xdg_surf->surface)
+                    xdg_popup_send_popup_done(xdg_surf->role);
+                popup->xdg_surface = NULL;
+            }
         }
         /* Destroy role resource if still alive */
         if (xdg_surf->role) {
