@@ -1,6 +1,8 @@
 #include "input.h"
 #include "compositor.h"
+#include "keymap.h"
 #include <stdlib.h>
+#include <unistd.h>
 
 static void pd(struct wl_resource *res) {
     struct lorie_pointer *p = wl_resource_get_user_data(res);
@@ -33,7 +35,14 @@ void seat_get_keyboard(struct wl_client *c, struct wl_resource *res, uint32_t id
     if (!k->r) { free(k); wl_client_post_no_memory(c); return; }
     wl_resource_set_implementation(k->r, NULL, k, kd);
     wl_list_insert(&in->keyboards, &k->link);
-    wl_keyboard_send_keymap(k->r, WL_KEYBOARD_KEYMAP_FORMAT_NO_KEYMAP, -1, 0);
+    size_t km_size = 0;
+    int km_fd = lorie_keymap_create_fd(&km_size);
+    if (km_fd >= 0) {
+        wl_keyboard_send_keymap(k->r, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, km_fd, km_size);
+        close(km_fd);
+    } else {
+        wl_keyboard_send_keymap(k->r, WL_KEYBOARD_KEYMAP_FORMAT_NO_KEYMAP, -1, 0);
+    }
     wl_keyboard_send_repeat_info(k->r, 40, 400);
 }
 

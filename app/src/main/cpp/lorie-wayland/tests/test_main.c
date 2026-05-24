@@ -15,6 +15,7 @@ extern int lorie_test_compositor_suite(struct lorie_test_suite* suite);
 extern int lorie_test_surface_suite(struct lorie_test_suite* suite);
 extern int lorie_test_renderer_suite(struct lorie_test_suite* suite);
 extern int lorie_test_input_suite(struct lorie_test_suite* suite);
+extern int lorie_test_keymap_suite(struct lorie_test_suite* suite);
 extern int lorie_test_protocols_suite(struct lorie_test_suite* suite);
 extern int lorie_test_xwayland_suite(struct lorie_test_suite* suite);
 extern int lorie_test_jni_suite(struct lorie_test_suite* suite);
@@ -49,6 +50,9 @@ int main(int argc, char** argv) {
 
     struct lorie_test_suite input_suite;
     lorie_test_input_suite(&input_suite);
+
+    struct lorie_test_suite keymap_suite;
+    lorie_test_keymap_suite(&keymap_suite);
 
     struct lorie_test_suite protocols_suite;
     lorie_test_protocols_suite(&protocols_suite);
@@ -94,6 +98,7 @@ int main(int argc, char** argv) {
         &surface_suite,
         &renderer_suite,
         &input_suite,
+        &keymap_suite,
         &protocols_suite,
         &xwayland_suite,
         &jni_suite,

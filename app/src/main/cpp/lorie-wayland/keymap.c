@@ -1,4 +1,69 @@
 #include "keymap.h"
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
+/* Minimal US-layout XKB keymap string (~2 KB).
+ * Self-contained: no include directives, no xkbcommon data files needed.
+ * Covers the keycodes mapped in android_to_linux_keycode[].
+ */
+static const char lorie_xkb_keymap[] =
+"xkb_keymap {\n"
+"xkb_keycodes \"evdev\" { minimum=8; maximum=255;\n"
+"<ESC>=9; <AE01>=10; <AE02>=11; <AE03>=12; <AE04>=13; <AE05>=14; <AE06>=15; <AE07>=16; <AE08>=17; <AE09>=18; <AE10>=19; <AE11>=20; <AE12>=21; <BKSP>=22; <TAB>=23;\n"
+"<AD01>=24; <AD02>=25; <AD03>=26; <AD04>=27; <AD05>=28; <AD06>=29; <AD07>=30; <AD08>=31; <AD09>=32; <AD10>=33; <AD11>=34; <AD12>=35; <RTRN>=36; <LCTL>=37;\n"
+"<AC01>=38; <AC02>=39; <AC03>=40; <AC04>=41; <AC05>=42; <AC06>=43; <AC07>=44; <AC08>=45; <AC09>=46; <AC10>=47; <AC11>=48; <TLDE>=49; <LFSH>=50; <BKSL>=51;\n"
+"<AB01>=52; <AB02>=53; <AB03>=54; <AB04>=55; <AB05>=56; <AB06>=57; <AB07>=58; <AB08>=59; <AB09>=60; <AB10>=61; <RTSH>=62; <LALT>=64; <SPCE>=65; <CAPS>=66;\n"
+"<FK01>=67; <FK02>=68; <FK03>=69; <FK04>=70; <FK05>=71; <FK06>=72; <FK07>=73; <FK08>=74; <FK09>=75; <FK10>=76; <NMLK>=77; <SCLK>=78;\n"
+"<KP7>=79; <KP8>=80; <KP9>=81; <KPSU>=82; <KP4>=83; <KP5>=84; <KP6>=85; <KPAD>=86; <KP1>=87; <KP2>=88; <KP3>=89; <KP0>=90; <KPDL>=91;\n"
+"<FK11>=95; <FK12>=96; <RCTL>=105; <RALT>=108; <HOME>=110; <UP>=111; <PGUP>=112; <LEFT>=113; <RGHT>=114; <END>=115; <DOWN>=116; <PGDN>=117; <INS>=118; <DELE>=119;\n"
+"<LWIN>=133; <RWIN>=134; <COMP>=135; <MENU>=143; };\n"
+"xkb_types \"complete\" { type \"ONE_LEVEL\" { modifiers=none; map[none]=1; }; type \"TWO_LEVEL\" { modifiers=Shift; map[none]=1; map[Shift]=2; }; };\n"
+"xkb_compat \"complete\" { };\n"
+"xkb_symbols \"us\" {\n"
+" key <ESC> { [Escape] }; key <AE01> { [1,exclam] }; key <AE02> { [2,at] }; key <AE03> { [3,numbersign] }; key <AE04> { [4,dollar] }; key <AE05> { [5,percent] };\n"
+" key <AE06> { [6,asciicircum] }; key <AE07> { [7,ampersand] }; key <AE08> { [8,asterisk] }; key <AE09> { [9,parenleft] }; key <AE10> { [0,parenright] };\n"
+" key <AE11> { [minus,underscore] }; key <AE12> { [equal,plus] }; key <BKSP> { [BackSpace] }; key <TAB> { [Tab,ISO_Left_Tab] };\n"
+" key <AD01> { [q,Q] }; key <AD02> { [w,W] }; key <AD03> { [e,E] }; key <AD04> { [r,R] }; key <AD05> { [t,T] }; key <AD06> { [y,Y] };\n"
+" key <AD07> { [u,U] }; key <AD08> { [i,I] }; key <AD09> { [o,O] }; key <AD10> { [p,P] }; key <AD11> { [bracketleft,braceleft] }; key <AD12> { [bracketright,braceright] };\n"
+" key <RTRN> { [Return] }; key <LCTL> { [Control_L] }; key <AC01> { [a,A] }; key <AC02> { [s,S] }; key <AC03> { [d,D] }; key <AC04> { [f,F] };\n"
+" key <AC05> { [g,G] }; key <AC06> { [h,H] }; key <AC07> { [j,J] }; key <AC08> { [k,K] }; key <AC09> { [l,L] }; key <AC10> { [semicolon,colon] };\n"
+" key <AC11> { [apostrophe,quotedbl] }; key <TLDE> { [grave,asciitilde] }; key <LFSH> { [Shift_L] }; key <BKSL> { [backslash,bar] };\n"
+" key <AB01> { [z,Z] }; key <AB02> { [x,X] }; key <AB03> { [c,C] }; key <AB04> { [v,V] }; key <AB05> { [b,B] }; key <AB06> { [n,N] };\n"
+" key <AB07> { [m,M] }; key <AB08> { [comma,less] }; key <AB09> { [period,greater] }; key <AB10> { [slash,question] }; key <RTSH> { [Shift_R] };\n"
+" key <LALT> { [Alt_L] }; key <SPCE> { [space] }; key <CAPS> { [Caps_Lock] }; key <FK01> { [F1] }; key <FK02> { [F2] }; key <FK03> { [F3] };\n"
+" key <FK04> { [F4] }; key <FK05> { [F5] }; key <FK06> { [F6] }; key <FK07> { [F7] }; key <FK08> { [F8] }; key <FK09> { [F9] }; key <FK10> { [F10] };\n"
+" key <NMLK> { [Num_Lock] }; key <SCLK> { [Scroll_Lock] }; key <KP7> { [KP_7] }; key <KP8> { [KP_8] }; key <KP9> { [KP_9] }; key <KPSU> { [KP_Subtract] };\n"
+" key <KP4> { [KP_4] }; key <KP5> { [KP_5] }; key <KP6> { [KP_6] }; key <KPAD> { [KP_Add] }; key <KP1> { [KP_1] }; key <KP2> { [KP_2] };\n"
+" key <KP3> { [KP_3] }; key <KP0> { [KP_0] }; key <KPDL> { [KP_Decimal] }; key <FK11> { [F11] }; key <FK12> { [F12] };\n"
+" key <RCTL> { [Control_R] }; key <RALT> { [Alt_R] }; key <HOME> { [Home] }; key <UP> { [Up] }; key <PGUP> { [Prior] };\n"
+" key <LEFT> { [Left] }; key <RGHT> { [Right] }; key <END> { [End] }; key <DOWN> { [Down] }; key <PGDN> { [Next] };\n"
+" key <INS> { [Insert] }; key <DELE> { [Delete] }; key <LWIN> { [Super_L] }; key <RWIN> { [Super_R] }; key <MENU> { [Menu] };\n"
+"};\n"
+"};\n";
+
+int lorie_keymap_create_fd(size_t *out_size) {
+    if (!out_size) return -1;
+    size_t len = strlen(lorie_xkb_keymap);
+    const char *tmpdir = getenv("TMPDIR");
+    if (!tmpdir) tmpdir = "/tmp";
+    char path[256];
+    int n = snprintf(path, sizeof(path), "%s/lorie-keymap-XXXXXX", tmpdir);
+    if (n < 0 || (size_t)n >= sizeof(path)) return -1;
+    int fd = mkstemp(path);
+    if (fd < 0) return -1;
+    if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) { close(fd); return -1; }
+    (void)unlink(path);
+    ssize_t written = write(fd, lorie_xkb_keymap, len);
+    if (written != (ssize_t)len) { close(fd); return -1; }
+    if (lseek(fd, 0, SEEK_SET) != 0) { close(fd); return -1; }
+    *out_size = len;
+    return fd;
+}
 
 int android_to_linux_keycode[304] = {
     [ 4   /* ANDROID_KEYCODE_BACK */] = KEY_ESC,

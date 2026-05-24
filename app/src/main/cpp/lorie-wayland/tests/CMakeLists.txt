@@ -12,6 +12,7 @@ set(LORIE_TEST_SOURCES
     test_surface.c
     test_renderer.c
     test_input.c
+    test_keymap.c
     test_protocols.c
     test_output.c
     ../compositor.c
