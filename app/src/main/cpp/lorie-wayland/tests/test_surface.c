@@ -2,6 +2,7 @@
 
 #include "lorie_test.h"
 #include "../compositor.h"
+#include "../renderer.h"
 #include <wayland-server-protocol.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -112,6 +113,45 @@ static void test_subsurface_no_self_parent(void) {
     lorie_compositor_destroy(c);
 }
 
+static void test_surface_registers_with_renderer(void) {
+    struct lorie_compositor *c = lorie_compositor_create();
+    ASSERT_NOT_NULL(c);
+    struct lorie_renderer *r = lorie_renderer_create();
+    ASSERT_NOT_NULL(r);
+    lorie_renderer_init(r);
+    c->renderer = r;
+
+    struct lorie_surface *s = lorie_surface_create_internal(c, NULL, 0);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ_INT(1, lorie_renderer_surface_count(r));
+
+    lorie_surface_destroy_internal(s);
+    lorie_compositor_destroy(c);
+    lorie_renderer_fini(r);
+    lorie_renderer_destroy(r);
+}
+
+static void test_surface_unregisters_on_destroy(void) {
+    struct lorie_compositor *c = lorie_compositor_create();
+    ASSERT_NOT_NULL(c);
+    struct lorie_renderer *r = lorie_renderer_create();
+    ASSERT_NOT_NULL(r);
+    lorie_renderer_init(r);
+    c->renderer = r;
+
+    struct lorie_surface *s = lorie_surface_create_internal(c, NULL, 0);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ_INT(1, lorie_renderer_surface_count(r));
+
+    lorie_surface_destroy_internal(s);
+
+    ASSERT_EQ_INT(0, lorie_renderer_surface_count(r));
+
+    lorie_compositor_destroy(c);
+    lorie_renderer_fini(r);
+    lorie_renderer_destroy(r);
+}
+
 int lorie_test_surface_suite(struct lorie_test_suite *suite) {
     lorie_suite_init(suite, "surface", NULL, NULL);
     SUITE_ADD(suite, test_surface_create_and_destroy);
@@ -120,5 +160,7 @@ int lorie_test_surface_suite(struct lorie_test_suite *suite) {
     SUITE_ADD(suite, test_region_add_subtract);
     SUITE_ADD(suite, test_frame_callback_not_fired_by_commit);
     SUITE_ADD(suite, test_subsurface_no_self_parent);
+    SUITE_ADD(suite, test_surface_registers_with_renderer);
+    SUITE_ADD(suite, test_surface_unregisters_on_destroy);
     return 0;
 }

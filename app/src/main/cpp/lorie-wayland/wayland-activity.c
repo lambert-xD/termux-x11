@@ -285,7 +285,6 @@ JNIEXPORT void JNICALL
 Java_com_termux_x11_WaylandEntryPoint_stop(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
     if (g_compositor) {
-        g_compositor->renderer = NULL;
         lorie_compositor_stop(g_compositor);
         lorie_compositor_destroy(g_compositor);
         g_compositor = NULL;
@@ -300,7 +299,7 @@ Java_com_termux_x11_WaylandEntryPoint_stop(JNIEnv *env, jclass clazz) {
 JNIEXPORT jboolean JNICALL
 Java_com_termux_x11_WaylandEntryPoint_connected(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
-    return (g_compositor && g_compositor->running) ? JNI_TRUE : JNI_FALSE;
+    return (g_compositor && atomic_load(&g_compositor->running)) ? JNI_TRUE : JNI_FALSE;
 }
 
 /* Helper: check whether the Activity-owned Wayland socket is ready. */
@@ -333,7 +332,6 @@ JNIEXPORT void JNICALL
 Java_com_termux_x11_WaylandCmdEntryPoint_stop(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
     if (g_compositor) {
-        g_compositor->renderer = NULL;
         lorie_compositor_stop(g_compositor);
         lorie_compositor_destroy(g_compositor);
         g_compositor = NULL;

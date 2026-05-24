@@ -31,6 +31,7 @@ const float *lorie_renderer_surface_get_transform(struct lorie_renderer *r,
 int lorie_renderer_is_first_commit(struct lorie_renderer *r);
 int lorie_renderer_surface_was_drawn(struct lorie_renderer *r,
                                        struct lorie_surface *s);
+int lorie_renderer_surface_count(struct lorie_renderer *r);
 
 /* DMA-BUF import helpers */
 int lorie_renderer_has_dmabuf_import(struct lorie_renderer *r);

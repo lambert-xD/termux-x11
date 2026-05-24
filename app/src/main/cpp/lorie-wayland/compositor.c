@@ -1,5 +1,6 @@
 #include "compositor.h"
 #include "input.h"
+#include "renderer.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -327,7 +328,7 @@ void lorie_compositor_destroy(struct lorie_compositor *c) {
     if (!c)
         return;
 
-    if (c->running)
+    if (atomic_load(&c->running))
         lorie_compositor_stop(c);
 
     /* Destroy outputs */
@@ -366,8 +367,10 @@ void lorie_compositor_destroy(struct lorie_compositor *c) {
 
 static void *event_loop_thread_fn(void *data) {
     struct lorie_compositor *c = data;
-    while (c->running) {
-        wl_event_loop_dispatch(c->event_loop, -1);
+    while (atomic_load(&c->running)) {
+        wl_event_loop_dispatch(c->event_loop, 16);
+        if (atomic_load(&c->running) && c->renderer)
+            lorie_renderer_commit(c->renderer);
     }
     return NULL;
 }
@@ -375,7 +378,7 @@ static void *event_loop_thread_fn(void *data) {
 int lorie_compositor_start(struct lorie_compositor *c) {
     if (!c || !c->display)
         return -1;
-    if (c->running)
+    if (atomic_load(&c->running))
         return 0;
 
     const char *name = c->socket_name[0] ? c->socket_name : NULL;
@@ -407,11 +410,11 @@ int lorie_compositor_start(struct lorie_compositor *c) {
         }
     }
 
-    c->running = 1;
+    atomic_store(&c->running, 1);
     if (pthread_create(&c->event_loop_thread, NULL,
                        event_loop_thread_fn, c) != 0) {
-        LOGE("Failed to create event loop thread");
-        c->running = 0;
+        LOGE("Failed to create event/render loop thread");
+        atomic_store(&c->running, 0);
         return -1;
     }
 
@@ -420,18 +423,15 @@ int lorie_compositor_start(struct lorie_compositor *c) {
 }
 
 void lorie_compositor_stop(struct lorie_compositor *c) {
-    if (!c || !c->running)
+    if (!c || !atomic_load(&c->running))
         return;
 
-    c->running = 0;
-
-    /* Wake up event loop so thread can exit */
-    wl_event_loop_dispatch(c->event_loop, 0);
-
-    /* Destroy all clients first (critical from review) */
-    wl_display_destroy_clients(c->display);
-
+    atomic_store(&c->running, 0);
     pthread_join(c->event_loop_thread, NULL);
+
+    /* Destroy clients after the event/render loop is stopped so surface
+     * teardown cannot race renderer_commit() surface traversal. */
+    wl_display_destroy_clients(c->display);
 
     LOGI("Compositor stopped");
 }

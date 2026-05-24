@@ -239,6 +239,8 @@ static void surface_handle_resource_destroy(struct wl_resource *resource) {
     pixman_region32_fini(&s->damage);
     if (s->compositor && s->compositor->input)
         lorie_input_clear_focus_for_surface(s->compositor->input, s);
+    if (s->compositor && s->compositor->renderer)
+        lorie_renderer_remove_surface(s->compositor->renderer, s);
     if (s->xdg_surface) {
         s->xdg_surface->surface = NULL;
         s->xdg_surface = NULL;
@@ -273,6 +275,8 @@ struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,
     }
     if (c)
         wl_list_insert(&c->surfaces, &s->link);
+    if (c && c->renderer)
+        lorie_renderer_add_surface(c->renderer, s);
     return s;
 }
 
@@ -283,6 +287,8 @@ void lorie_surface_destroy_internal(struct lorie_surface *s) {
     else {
         if (s->compositor && s->compositor->input)
             lorie_input_clear_focus_for_surface(s->compositor->input, s);
+        if (s->compositor && s->compositor->renderer)
+            lorie_renderer_remove_surface(s->compositor->renderer, s);
         if (s->xdg_surface) {
             s->xdg_surface->surface = NULL;
             s->xdg_surface = NULL;

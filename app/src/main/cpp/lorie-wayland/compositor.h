@@ -6,6 +6,7 @@
 #include <wayland-server-core.h>
 #include <android/native_window.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <pixman.h>
 
 struct lorie_input;
@@ -54,7 +55,7 @@ struct lorie_compositor {
     struct wl_list data_devices;
     pthread_mutex_t lock;
     ANativeWindow *native_window;
-    int running;
+    atomic_int running;
     pthread_t event_loop_thread;
     struct lorie_input *input;
     struct lorie_renderer *renderer;

@@ -10,6 +10,8 @@
 
 #include "lorie_test.h"
 #include "../compositor.h"
+#include "../renderer.h"
+#include <unistd.h>
 
 static void test_compositor_create_returns_non_null(void) {
     struct lorie_compositor *c = lorie_compositor_create();
@@ -101,6 +103,27 @@ static void test_compositor_has_output_global_after_start(void) {
     lorie_compositor_destroy(c);
 }
 
+static void test_compositor_render_loop_lifecycle(void) {
+    struct lorie_compositor *c = lorie_compositor_create();
+    ASSERT_NOT_NULL(c);
+    struct lorie_renderer *r = lorie_renderer_create();
+    ASSERT_NOT_NULL(r);
+    lorie_renderer_init(r);
+    c->renderer = r;
+
+    ASSERT_EQ_INT(0, lorie_compositor_start(c));
+    /* Let event/render loop run briefly */
+    usleep(50000);
+    ASSERT_TRUE(atomic_load(&c->running));
+
+    lorie_compositor_stop(c);
+    ASSERT_TRUE(!atomic_load(&c->running));
+
+    lorie_compositor_destroy(c);
+    lorie_renderer_fini(r);
+    lorie_renderer_destroy(r);
+}
+
 int lorie_test_compositor_suite(struct lorie_test_suite* suite) {
     lorie_suite_init(suite, "compositor", NULL, NULL);
     SUITE_ADD(suite, test_compositor_create_returns_non_null);
@@ -111,5 +134,6 @@ int lorie_test_compositor_suite(struct lorie_test_suite* suite) {
     SUITE_ADD(suite, test_output_create_destroy);
     SUITE_ADD(suite, test_output_zero_dimensions_rejected);
     SUITE_ADD(suite, test_compositor_has_output_global_after_start);
+    SUITE_ADD(suite, test_compositor_render_loop_lifecycle);
     return 0;
 }

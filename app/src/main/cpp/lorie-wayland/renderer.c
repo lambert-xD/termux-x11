@@ -109,6 +109,14 @@ struct lorie_renderer *lorie_renderer_create(void) {
 void lorie_renderer_destroy(struct lorie_renderer *r) {
     if (!r) return;
     lorie_renderer_fini(r);
+    pthread_mutex_lock(&r->surfaces_lock);
+    struct renderer_surface *rs, *tmp;
+    wl_list_for_each_safe(rs, tmp, &r->surfaces, link) {
+        wl_list_remove(&rs->link);
+        pixman_region32_fini(&rs->accumulated_damage);
+        free(rs);
+    }
+    pthread_mutex_unlock(&r->surfaces_lock);
     pthread_mutex_destroy(&r->egl_lock);
     pthread_mutex_destroy(&r->surfaces_lock);
     free(r);
@@ -524,4 +532,14 @@ int lorie_renderer_surface_was_drawn(struct lorie_renderer *r,
     }
     pthread_mutex_unlock(&r->surfaces_lock);
     return result;
+}
+
+int lorie_renderer_surface_count(struct lorie_renderer *r) {
+    if (!r) return 0;
+    int count = 0;
+    pthread_mutex_lock(&r->surfaces_lock);
+    struct renderer_surface *rs;
+    wl_list_for_each(rs, &r->surfaces, link) count++;
+    pthread_mutex_unlock(&r->surfaces_lock);
+    return count;
 }

@@ -19,7 +19,7 @@ static void test_full_lifecycle(void) {
     ASSERT_NOT_NULL(c);
     ASSERT_NOT_NULL(c->display);
     ASSERT_NOT_NULL(c->input);
-    ASSERT_TRUE(c->running);
+    ASSERT_TRUE(atomic_load(&c->running));
     /* Globals must exist after start */
     ASSERT_NOT_NULL(c->compositor_global);
     ASSERT_NOT_NULL(c->subcompositor_global);
