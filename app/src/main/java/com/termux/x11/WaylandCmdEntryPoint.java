@@ -60,6 +60,7 @@ public class WaylandCmdEntryPoint extends ICmdEntryInterface.Stub {
             System.exit(1);
 
         spawnListeningThread();
+        sendBroadcast();
         sendBroadcastDelayed();
 
         if (xstartupCommand != null) {
@@ -220,6 +221,7 @@ public class WaylandCmdEntryPoint extends ICmdEntryInterface.Stub {
     public ParcelFileDescriptor getXConnection() { return null; }
     public native ParcelFileDescriptor getWaylandConnection();
     public native ParcelFileDescriptor getLogcatOutput();
+    public native ParcelFileDescriptor getWaylandSocketFd();
     private static native boolean connected();
     private native void listenForConnections();
 

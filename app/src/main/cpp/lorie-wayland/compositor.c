@@ -293,6 +293,8 @@ struct lorie_compositor *lorie_compositor_create(void) {
         goto fail_globals;
     }
 
+    c->socket_fd = -1;
+
     c->data_device_manager_global = lorie_data_device_manager_create(c->display, c);
     if (!c->data_device_manager_global) {
         LOGE("Failed to create data_device_manager global");
@@ -358,6 +360,10 @@ void lorie_compositor_destroy(struct lorie_compositor *c) {
 
     if (c->display)
         wl_display_destroy(c->display);
+    if (c->socket_fd >= 0) {
+        close(c->socket_fd);
+        c->socket_fd = -1;
+    }
 
     pthread_mutex_destroy(&c->lock);
 
@@ -381,19 +387,31 @@ int lorie_compositor_start(struct lorie_compositor *c) {
     if (atomic_load(&c->running))
         return 0;
 
-    const char *name = c->socket_name[0] ? c->socket_name : NULL;
     const char *socket_name;
-    if (name) {
-        if (wl_display_add_socket(c->display, name) != 0) {
-            LOGE("Failed to add socket");
+    if (c->socket_fd >= 0) {
+        int socket_fd = c->socket_fd;
+        if (wl_display_add_socket_fd(c->display, socket_fd) != 0) {
+            LOGE("Failed to add socket fd");
+            close(socket_fd);
+            c->socket_fd = -1;
             return -1;
         }
-        socket_name = name;
+        c->socket_fd = -1;
+        socket_name = c->socket_name[0] ? c->socket_name : "wayland-0";
     } else {
-        socket_name = wl_display_add_socket_auto(c->display);
-        if (!socket_name) {
-            LOGE("Failed to add socket");
-            return -1;
+        const char *name = c->socket_name[0] ? c->socket_name : NULL;
+        if (name) {
+            if (wl_display_add_socket(c->display, name) != 0) {
+                LOGE("Failed to add socket");
+                return -1;
+            }
+            socket_name = name;
+        } else {
+            socket_name = wl_display_add_socket_auto(c->display);
+            if (!socket_name) {
+                LOGE("Failed to add socket");
+                return -1;
+            }
         }
     }
     LOGI("Wayland socket: %s", socket_name);
@@ -473,6 +491,13 @@ void lorie_compositor_set_socket_name(struct lorie_compositor *c, const char *na
     if (!c || !name) return;
     strncpy(c->socket_name, name, sizeof(c->socket_name) - 1);
     c->socket_name[sizeof(c->socket_name) - 1] = '\0';
+}
+
+void lorie_compositor_set_socket_fd(struct lorie_compositor *c, int fd) {
+    if (!c) return;
+    if (c->socket_fd >= 0 && c->socket_fd != fd)
+        close(c->socket_fd);
+    c->socket_fd = fd;
 }
 
 /* Forward declarations — implemented in surface.c */

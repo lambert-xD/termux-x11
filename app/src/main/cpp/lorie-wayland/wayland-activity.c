@@ -17,6 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <errno.h>
 #include "compositor.h"
 #include "input.h"
@@ -34,6 +36,9 @@ static struct lorie_renderer *g_renderer = NULL;
 static JavaVM *g_jvm = NULL;
 static jobject g_lorie_view = NULL;
 static pthread_mutex_t g_jni_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int g_pending_socket_fd = -1;
+static int g_wayland_socket_fd = -1;
+static atomic_int g_wayland_socket_handed_off = 0;
 
 static void clipboard_callback(const char *text, size_t len, void *user_data) {
     (void)user_data;
@@ -187,6 +192,55 @@ Java_com_termux_x11_LorieWaylandView_sendClipboardEvent(JNIEnv *env, jobject thi
 
 
 
+/* Create a listening AF_UNIX socket at $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY.
+   Returns the fd on success, -1 on failure. */
+int lorie_create_wayland_socket(void) {
+    const char *xdg_runtime = getenv("XDG_RUNTIME_DIR");
+    const char *wayland_display = getenv("WAYLAND_DISPLAY");
+    if (!xdg_runtime || !wayland_display) {
+        LOGE("XDG_RUNTIME_DIR or WAYLAND_DISPLAY not set");
+        return -1;
+    }
+
+    char path[1024];
+    int n = snprintf(path, sizeof(path), "%s/%s", xdg_runtime, wayland_display);
+    if (n < 0 || (size_t)n >= sizeof(path)) {
+        LOGE("Socket path too long");
+        return -1;
+    }
+
+    struct sockaddr_un addr = { .sun_family = AF_UNIX };
+    if (strlen(path) >= sizeof(addr.sun_path)) {
+        LOGE("Socket path too long for sockaddr_un: %s", path);
+        return -1;
+    }
+
+    unlink(path);
+
+    int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    if (fd < 0) {
+        LOGE("Failed to create socket: %s", strerror(errno));
+        return -1;
+    }
+
+    strncpy(addr.sun_path, path, sizeof(addr.sun_path) - 1);
+
+    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        LOGE("Failed to bind socket: %s", strerror(errno));
+        close(fd);
+        return -1;
+    }
+
+    if (listen(fd, 128) < 0) {
+        LOGE("Failed to listen on socket: %s", strerror(errno));
+        close(fd);
+        unlink(path);
+        return -1;
+    }
+
+    return fd;
+}
+
 int lorie_setup_wayland_runtime_dir(void) {
     const char *xdg_runtime = getenv("XDG_RUNTIME_DIR");
     const char *tmpdir = getenv("TMPDIR");
@@ -260,6 +314,11 @@ Java_com_termux_x11_WaylandEntryPoint_start(JNIEnv *env, jclass clazz,
     lorie_compositor_set_socket_name(g_compositor,
         wayland_display ? wayland_display : "wayland-0");
 
+    if (g_pending_socket_fd >= 0) {
+        lorie_compositor_set_socket_fd(g_compositor, g_pending_socket_fd);
+        g_pending_socket_fd = -1;
+    }
+
     if (lorie_compositor_start(g_compositor) != 0) goto fail;
     return JNI_TRUE;
 fail:
@@ -284,6 +343,10 @@ fail:
 JNIEXPORT void JNICALL
 Java_com_termux_x11_WaylandEntryPoint_stop(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
+    if (g_pending_socket_fd >= 0) {
+        close(g_pending_socket_fd);
+        g_pending_socket_fd = -1;
+    }
     if (g_compositor) {
         lorie_compositor_stop(g_compositor);
         lorie_compositor_destroy(g_compositor);
@@ -300,6 +363,24 @@ JNIEXPORT jboolean JNICALL
 Java_com_termux_x11_WaylandEntryPoint_connected(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
     return (g_compositor && atomic_load(&g_compositor->running)) ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT void JNICALL
+Java_com_termux_x11_WaylandEntryPoint_setSocketFd(JNIEnv *env, jclass clazz, jint fd) {
+    (void)env; (void)clazz;
+    if (fd < 0)
+        return;
+    if (g_compositor) {
+        if (atomic_load(&g_compositor->running)) {
+            close(fd);
+            return;
+        }
+        lorie_compositor_set_socket_fd(g_compositor, fd);
+    } else {
+        if (g_pending_socket_fd >= 0)
+            close(g_pending_socket_fd);
+        g_pending_socket_fd = fd;
+    }
 }
 
 /* Helper: check whether the Activity-owned Wayland socket is ready. */
@@ -324,13 +405,27 @@ Java_com_termux_x11_WaylandCmdEntryPoint_start(JNIEnv *env, jclass clazz,
     (void)env; (void)clazz; (void)args;
     /* PR3: command process no longer creates a compositor.
        The Activity process owns the only Wayland compositor.
-       Still configure runtime env so connected() knows which socket to poll. */
-    return lorie_setup_wayland_runtime_dir() == 0 ? JNI_TRUE : JNI_FALSE;
+       Create the listening socket here so clients in the Termux sandbox
+       can connect via the filesystem path; the fd is handed off to the
+       Activity compositor via getWaylandSocketFd(). */
+    atomic_store(&g_wayland_socket_handed_off, 0);
+    if (g_wayland_socket_fd >= 0) {
+        close(g_wayland_socket_fd);
+        g_wayland_socket_fd = -1;
+    }
+    if (lorie_setup_wayland_runtime_dir() != 0) return JNI_FALSE;
+    g_wayland_socket_fd = lorie_create_wayland_socket();
+    return g_wayland_socket_fd >= 0 ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
 Java_com_termux_x11_WaylandCmdEntryPoint_stop(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
+    if (g_wayland_socket_fd >= 0) {
+        close(g_wayland_socket_fd);
+        g_wayland_socket_fd = -1;
+    }
+    atomic_store(&g_wayland_socket_handed_off, 0);
     if (g_compositor) {
         lorie_compositor_stop(g_compositor);
         lorie_compositor_destroy(g_compositor);
@@ -346,14 +441,51 @@ Java_com_termux_x11_WaylandCmdEntryPoint_stop(JNIEnv *env, jclass clazz) {
 JNIEXPORT jboolean JNICALL
 Java_com_termux_x11_WaylandCmdEntryPoint_connected(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
-    /* PR3: poll the Activity-owned socket instead of a local g_compositor. */
-    return lorie_wayland_socket_ready() ? JNI_TRUE : JNI_FALSE;
+    /* Command-side readiness starts after the Activity has requested the
+       listener fd; the socket path exists before the Activity is launched. */
+    return (atomic_load(&g_wayland_socket_handed_off) &&
+            lorie_wayland_socket_ready()) ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jobject JNICALL
 Java_com_termux_x11_WaylandCmdEntryPoint_getWaylandConnection(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
     return NULL;
+}
+
+JNIEXPORT jobject JNICALL
+Java_com_termux_x11_WaylandCmdEntryPoint_getWaylandSocketFd(JNIEnv *env, jobject thiz) {
+    (void)thiz;
+    if (g_wayland_socket_fd < 0) return NULL;
+
+    int fd = dup(g_wayland_socket_fd);
+    if (fd < 0) {
+        LOGE("Failed to duplicate Wayland socket fd: %s", strerror(errno));
+        return NULL;
+    }
+    if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
+        LOGE("Failed to set CLOEXEC on Wayland socket fd: %s", strerror(errno));
+        close(fd);
+        return NULL;
+    }
+
+    jclass ParcelFileDescriptorClass = (*env)->FindClass(env, "android/os/ParcelFileDescriptor");
+    if (!ParcelFileDescriptorClass) {
+        close(fd);
+        return NULL;
+    }
+    jmethodID adoptFd = (*env)->GetStaticMethodID(env, ParcelFileDescriptorClass, "adoptFd", "(I)Landroid/os/ParcelFileDescriptor;");
+    if (!adoptFd) {
+        close(fd);
+        return NULL;
+    }
+    jobject pfd = (*env)->CallStaticObjectMethod(env, ParcelFileDescriptorClass, adoptFd, fd);
+    if (!pfd || (*env)->ExceptionCheck(env)) {
+        close(fd);
+        return pfd;
+    }
+    atomic_store(&g_wayland_socket_handed_off, 1);
+    return pfd;
 }
 
 JNIEXPORT jobject JNICALL
