@@ -5,6 +5,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <signal.h>
+#include <stddef.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
@@ -19,6 +20,12 @@
 #define loge(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 #define MAX_DISPLAY 99
+
+static int clear_cloexec(int fd) {
+    int flags = fcntl(fd, F_GETFD);
+    if (flags < 0) return -1;
+    return fcntl(fd, F_SETFD, flags & ~FD_CLOEXEC);
+}
 
 static char *get_tmpdir(void) {
     const char *t = getenv("TMPDIR");
@@ -99,16 +106,24 @@ struct lorie_xwayland *lorie_xwayland_init(struct lorie_compositor *c,
     xw->compositor = c;
     xw->xserver_path = xserver_path ? strdup(xserver_path) : NULL;
     xw->pid = -1;
+    xw->display_number = -1;
     xw->abstract_fd = -1;
     xw->unix_fd = -1;
     xw->wm_fd[0] = -1;
     xw->wm_fd[1] = -1;
+    xw->sigchld_source = NULL;
 
     if (socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, xw->wm_fd) < 0) {
-        free(xw); return NULL;
+        free(xw->xserver_path);
+        free(xw);
+        return NULL;
     }
 
     char *tmpdir = get_tmpdir();
+    if (!tmpdir) {
+        lorie_xwayland_shutdown(xw);
+        return NULL;
+    }
     for (int d = 0; d <= MAX_DISPLAY; d++) {
         char *lockfile = NULL;
         if (create_lockfile(d, tmpdir, &lockfile) < 0) continue;
@@ -137,11 +152,17 @@ struct lorie_xwayland *lorie_xwayland_init(struct lorie_compositor *c,
 static int sigchld_handler(int sig, void *data) {
     (void)sig;
     struct lorie_xwayland *xw = data;
+    if (!xw || xw->pid <= 0) return 1;
+
     int status;
     pid_t pid = waitpid(xw->pid, &status, WNOHANG);
     if (pid == xw->pid) {
         xw->pid = -1;
         xw->running = 0;
+        if (xw->sigchld_source) {
+            wl_event_source_remove(xw->sigchld_source);
+            xw->sigchld_source = NULL;
+        }
     }
     return 1;
 }
@@ -164,6 +185,7 @@ static pid_t spawn_xwayland(struct lorie_xwayland *xw) {
 
     /* Must use mutable char* for execvp */
     char *bin = xw->xserver_path ? strdup(xw->xserver_path) : strdup("Xwayland");
+    if (!bin) return -1;
 
     argv[argc++] = bin;
     argv[argc++] = display_str;
@@ -180,19 +202,32 @@ static pid_t spawn_xwayland(struct lorie_xwayland *xw) {
     argv[argc++] = "tcp";
     argv[argc] = NULL;
 
-    /* Register SIGCHLD handler BEFORE fork to avoid race */
+    /* Register SIGCHLD handler BEFORE fork to avoid race. */
     struct wl_event_loop *loop = wl_display_get_event_loop(xw->compositor->display);
-    struct wl_event_source *sigchld =
-        wl_event_loop_add_signal(loop, SIGCHLD, sigchld_handler, xw);
-    (void)sigchld; /* kept alive until shutdown */
+    if (!loop) {
+        free(bin);
+        return -1;
+    }
+    xw->sigchld_source = wl_event_loop_add_signal(loop, SIGCHLD, sigchld_handler, xw);
+    if (!xw->sigchld_source) {
+        free(bin);
+        return -1;
+    }
 
     pid_t pid = fork();
     if (pid < 0) {
+        wl_event_source_remove(xw->sigchld_source);
+        xw->sigchld_source = NULL;
         free(bin);
         return -1;
     }
     if (pid == 0) {
         close(xw->wm_fd[0]);
+        if (clear_cloexec(xw->abstract_fd) < 0 ||
+            clear_cloexec(xw->unix_fd) < 0 ||
+            clear_cloexec(xw->wm_fd[1]) < 0) {
+            _exit(127);
+        }
         setenv("DISPLAY", display_str, 1);
         signal(SIGCHLD, SIG_DFL);
         execvp(bin, argv);
@@ -200,12 +235,15 @@ static pid_t spawn_xwayland(struct lorie_xwayland *xw) {
     }
     free(bin);
     close(xw->wm_fd[1]);
+    xw->wm_fd[1] = -1;
     return pid;
 }
 
 int lorie_xwayland_launch(struct lorie_xwayland *xw) {
     if (!xw || xw->running) return -1;
     if (xw->display_number < 0) return -1;
+    if (!xw->compositor || !xw->compositor->display) return -1;
+    if (xw->abstract_fd < 0 || xw->unix_fd < 0 || xw->wm_fd[1] < 0) return -1;
 
     xw->pid = spawn_xwayland(xw);
     if (xw->pid < 0) return -1;
@@ -226,6 +264,11 @@ void lorie_xwayland_shutdown(struct lorie_xwayland *xw) {
         }
         xw->running = 0;
         xw->pid = -1;
+    }
+
+    if (xw->sigchld_source) {
+        wl_event_source_remove(xw->sigchld_source);
+        xw->sigchld_source = NULL;
     }
 
     if (xw->abstract_fd >= 0) { close(xw->abstract_fd); xw->abstract_fd = -1; }
