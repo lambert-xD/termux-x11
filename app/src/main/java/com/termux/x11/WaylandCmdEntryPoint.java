@@ -4,6 +4,7 @@ import static android.system.Os.getuid;
 import static android.system.Os.getenv;
 
 import android.annotation.SuppressLint;
+import android.app.ActivityOptions;
 import android.app.IActivityManager;
 import android.app.PendingIntent;
 import android.content.Context;
@@ -60,8 +61,8 @@ public class WaylandCmdEntryPoint extends ICmdEntryInterface.Stub {
             System.exit(1);
 
         spawnListeningThread();
-        sendBroadcast();
-        sendBroadcastDelayed();
+        startActivity();
+        handler.postDelayed(this::sendBroadcastDelayed, 3000);
 
         if (xstartupCommand != null) {
             new Thread(() -> {
@@ -105,22 +106,80 @@ public class WaylandCmdEntryPoint extends ICmdEntryInterface.Stub {
         }
     }
 
-    @SuppressLint({"WrongConstant", "PrivateApi"})
-    private Intent createIntent() {
+    private String getTargetPackage() {
         String targetPackage = getenv("TERMUX_X11_OVERRIDE_PACKAGE");
-        if (targetPackage == null)
-            targetPackage = "com.termux.x11";
+        return targetPackage != null ? targetPackage : "com.termux.x11";
+    }
+
+    private String getCallerPackage() {
+        try {
+            return android.app.ActivityThread.getPackageManager().getPackagesForUid(getuid())[0];
+        } catch (RemoteException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private Bundle createBinderBundle() {
         Bundle bundle = new Bundle();
         bundle.putBinder(null, this);
+        return bundle;
+    }
 
+    @SuppressLint({"WrongConstant", "PrivateApi"})
+    private Intent createIntent() {
         Intent intent = new Intent(ACTION_START);
-        intent.putExtra(null, bundle);
-        intent.setPackage(targetPackage);
+        intent.putExtra(null, createBinderBundle());
+        intent.setPackage(getTargetPackage());
 
         if (getuid() == 0 || getuid() == 2000)
             intent.setFlags(0x00400000 /* FLAG_RECEIVER_FROM_SHELL */);
 
         return intent;
+    }
+
+    private Intent createActivityIntent() {
+        Intent intent = new Intent();
+        intent.setClassName(getTargetPackage(), "com.termux.x11.WaylandActivity");
+        intent.putExtra(null, createBinderBundle());
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP |
+            Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        return intent;
+    }
+
+    private void startActivity() {
+        try {
+            Bundle options = null;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                ActivityOptions activityOptions = ActivityOptions.makeBasic();
+                activityOptions.setPendingIntentBackgroundActivityStartMode(
+                    ActivityOptions.MODE_BACKGROUND_ACTIVITY_START_ALLOWED);
+                options = activityOptions.toBundle();
+            }
+            IActivityManager am;
+            try {
+                //noinspection JavaReflectionMemberAccess
+                am = (IActivityManager) android.app.ActivityManager.class
+                        .getMethod("getService")
+                        .invoke(null);
+            } catch (Exception e) {
+                am = (IActivityManager) Class.forName("android.app.ActivityManagerNative")
+                        .getMethod("getDefault")
+                        .invoke(null);
+            }
+            assert am != null;
+            IIntentSender sender = am.getIntentSender(2 /* INTENT_SENDER_ACTIVITY */, getCallerPackage(),
+                null, null, 0, new Intent[] { createActivityIntent() }, null,
+                PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE,
+                options, 0);
+            //noinspection JavaReflectionMemberAccess
+            IIntentSender.class
+                    .getMethod("send", int.class, Intent.class, String.class, IBinder.class, IIntentReceiver.class, String.class, Bundle.class)
+                    .invoke(sender, 0, null, null, null, new IIntentReceiver.Stub() {
+                        @Override public void performReceive(Intent i, int r, String d, Bundle e, boolean o, boolean s, int a) {}
+                    }, null, options);
+        } catch (Exception e) {
+            Log.e("WaylandCmdEntryPoint", "Failed to start WaylandActivity", e);
+        }
     }
 
     private void sendBroadcast() {

@@ -237,6 +237,7 @@ void lorie_renderer_set_window(struct lorie_renderer *r, ANativeWindow *window) 
             r->a_position = glGetAttribLocation(r->program, "position");
             r->a_texcoords = glGetAttribLocation(r->program, "texCoords");
         }
+        eglMakeCurrent(r->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     }
     pthread_mutex_unlock(&r->egl_lock);
 }
@@ -509,6 +510,7 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
     }
 
     eglSwapBuffers(r->egl_display, r->egl_surface);
+    eglMakeCurrent(r->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
     pthread_mutex_unlock(&r->egl_lock);
     free(sorted);
     return 0;
