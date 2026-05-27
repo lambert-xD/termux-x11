@@ -19,6 +19,7 @@ public class WaylandActivity extends Activity {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         setContentView(R.layout.wayland_activity);
+        findViewById(R.id.lorieView).requestFocus();
         findViewById(R.id.exit_button).setOnClickListener(v -> finish());
         WaylandEntryPoint.start(new String[]{});
         handleStartIntent(getIntent());

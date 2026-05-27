@@ -224,7 +224,7 @@ int lorie_input_dispatch(void *data) {
                 struct lorie_pointer *p;
                 wl_list_for_each(p, &in->pointers, link) {
                     if (wl_resource_get_client(p->r) == client)
-                        wl_pointer_send_motion(p->r, ns(in), wl_fixed_from_double(e->motion.x - in->pointer_focus->x), wl_fixed_from_double(e->motion.y - in->pointer_focus->y));
+                        wl_pointer_send_motion(p->r, 0, wl_fixed_from_double(e->motion.x - in->pointer_focus->x), wl_fixed_from_double(e->motion.y - in->pointer_focus->y));
                 }
             }
             in->pointer_dirty = 1; break;
@@ -234,7 +234,7 @@ int lorie_input_dispatch(void *data) {
                 struct lorie_pointer *p;
                 wl_list_for_each(p, &in->pointers, link) {
                     if (wl_resource_get_client(p->r) == client)
-                        wl_pointer_send_button(p->r, 0, ns(in), e->button.button, e->button.state);
+                        wl_pointer_send_button(p->r, ns(in), 0, e->button.button, e->button.state);
                 }
             }
             in->pointer_dirty = 1; break;
@@ -258,7 +258,7 @@ int lorie_input_dispatch(void *data) {
                 struct lorie_touch *t;
                 wl_list_for_each(t, &in->touches, link) {
                     if (wl_resource_get_client(t->r) == client)
-                        wl_touch_send_down(t->r, 0, ns(in), NULL, e->touch.id, wl_fixed_from_double(e->touch.x), wl_fixed_from_double(e->touch.y));
+                        wl_touch_send_down(t->r, ns(in), 0, in->touch_focus->resource, e->touch.id, wl_fixed_from_double(e->touch.x), wl_fixed_from_double(e->touch.y));
                 }
             }
             in->touch_dirty = 1; break;
@@ -278,7 +278,7 @@ int lorie_input_dispatch(void *data) {
                 struct lorie_touch *t;
                 wl_list_for_each(t, &in->touches, link) {
                     if (wl_resource_get_client(t->r) == client)
-                        wl_touch_send_motion(t->r, ns(in), e->touch.id, wl_fixed_from_double(e->touch.x), wl_fixed_from_double(e->touch.y));
+                        wl_touch_send_motion(t->r, 0, e->touch.id, wl_fixed_from_double(e->touch.x), wl_fixed_from_double(e->touch.y));
                 }
             }
             in->touch_dirty = 1; break;
