@@ -3,6 +3,7 @@
  */
 
 #include "lorie_test.h"
+#include "../compositor.h"
 #include "../xwayland.h"
 #include <unistd.h>
 #include <sys/stat.h>
@@ -51,7 +52,7 @@ static void test_xwayland_wm_socketpair(void) {
     lorie_xwayland_shutdown(xw);
 }
 
-static void test_xwayland_launch_rejects_null_compositor(void) {
+static void test_xwayland_launch_missing_binary_fails(void) {
     struct lorie_xwayland *xw = lorie_xwayland_init(NULL, "/nonexistent/Xwayland");
     ASSERT_NOT_NULL(xw);
     ASSERT_EQ_INT(-1, lorie_xwayland_launch(xw));
@@ -61,6 +62,16 @@ static void test_xwayland_launch_rejects_null_compositor(void) {
     lorie_xwayland_shutdown(xw);
 }
 
+static void test_xwayland_init_owns_compositor(void) {
+    struct lorie_compositor *c = lorie_compositor_create();
+    ASSERT_NOT_NULL(c);
+    struct lorie_xwayland *xw = lorie_xwayland_init(c, "/nonexistent/Xwayland");
+    ASSERT_NOT_NULL(xw);
+    ASSERT_EQ_PTR(c, xw->compositor);
+    lorie_xwayland_shutdown(xw);
+    lorie_compositor_destroy(c);
+}
+
 int lorie_test_xwayland_suite(struct lorie_test_suite* suite) {
     lorie_suite_init(suite, "xwayland", NULL, NULL);
     SUITE_ADD(suite, test_xwayland_init_shutdown);
@@ -68,6 +79,7 @@ int lorie_test_xwayland_suite(struct lorie_test_suite* suite) {
     SUITE_ADD(suite, test_xwayland_lockfile_format);
     SUITE_ADD(suite, test_xwayland_sockets_created);
     SUITE_ADD(suite, test_xwayland_wm_socketpair);
-    SUITE_ADD(suite, test_xwayland_launch_rejects_null_compositor);
+    SUITE_ADD(suite, test_xwayland_launch_missing_binary_fails);
+    SUITE_ADD(suite, test_xwayland_init_owns_compositor);
     return 0;
 }

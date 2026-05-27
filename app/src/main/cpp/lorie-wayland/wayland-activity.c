@@ -25,6 +25,7 @@
 #include "input.h"
 #include "renderer.h"
 #include "keymap.h"
+#include "xwayland.h"
 
 #define LOG_TAG "WaylandJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -40,6 +41,7 @@ static pthread_mutex_t g_jni_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int g_pending_socket_fd = -1;
 static int g_wayland_socket_fd = -1;
 static atomic_int g_wayland_socket_handed_off = 0;
+static struct lorie_xwayland *g_cmd_xwayland = NULL;
 
 #define MAX_PENDING_WAYLAND_CONNECTIONS 16
 static pthread_mutex_t g_wayland_connection_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -198,6 +200,30 @@ Java_com_termux_x11_LorieWaylandView_sendClipboardEvent(JNIEnv *env, jobject thi
 
 
 
+static const char *discover_xwayland_path(void) {
+    const char *env = getenv("TERMUX_X11_XWAYLAND");
+    if (env && env[0] && access(env, X_OK) == 0)
+        return env;
+
+    env = getenv("XWAYLAND");
+    if (env && env[0] && access(env, X_OK) == 0)
+        return env;
+
+    const char *prefix = getenv("PREFIX");
+    if (prefix && prefix[0]) {
+        static char path[1024];
+        int n = snprintf(path, sizeof(path), "%s/bin/Xwayland", prefix);
+        if (n > 0 && (size_t)n < sizeof(path) && access(path, X_OK) == 0)
+            return path;
+    }
+
+    static const char termux_path[] = "/data/data/com.termux/files/usr/bin/Xwayland";
+    if (access(termux_path, X_OK) == 0)
+        return termux_path;
+
+    return "Xwayland";
+}
+
 /* Create a listening AF_UNIX socket at $XDG_RUNTIME_DIR/$WAYLAND_DISPLAY.
    Returns the fd on success, -1 on failure. */
 int lorie_create_wayland_socket(void) {
@@ -308,6 +334,8 @@ int lorie_setup_wayland_runtime_dir(void) {
             return -1;
         }
         setenv("XDG_RUNTIME_DIR", runtime_dir, 1);
+        if (!tmpdir || !tmpdir[0])
+            setenv("TMPDIR", runtime_dir, 1);
     }
 
     const char *wayland_display = getenv("WAYLAND_DISPLAY");
@@ -460,13 +488,32 @@ Java_com_termux_x11_WaylandCmdEntryPoint_start(JNIEnv *env, jclass clazz,
        Activity compositor through Binder. */
     atomic_store(&g_wayland_socket_handed_off, 0);
     clear_pending_wayland_connections();
+    if (g_cmd_xwayland) {
+        lorie_xwayland_shutdown(g_cmd_xwayland);
+        g_cmd_xwayland = NULL;
+    }
     if (g_wayland_socket_fd >= 0) {
         close(g_wayland_socket_fd);
         g_wayland_socket_fd = -1;
     }
     if (lorie_setup_wayland_runtime_dir() != 0) return JNI_FALSE;
     g_wayland_socket_fd = lorie_create_wayland_socket();
-    return g_wayland_socket_fd >= 0 ? JNI_TRUE : JNI_FALSE;
+    if (g_wayland_socket_fd < 0) return JNI_FALSE;
+
+    const char *xwayland_path = discover_xwayland_path();
+    g_cmd_xwayland = lorie_xwayland_init(NULL, xwayland_path);
+    if (g_cmd_xwayland) {
+        if (lorie_xwayland_launch(g_cmd_xwayland) == 0) {
+            LOGI("XWayland launched on display :%d", g_cmd_xwayland->display_number);
+        } else {
+            LOGI("XWayland launch failed for %s", xwayland_path);
+            lorie_xwayland_shutdown(g_cmd_xwayland);
+            g_cmd_xwayland = NULL;
+        }
+    } else {
+        LOGI("XWayland init failed for %s", xwayland_path);
+    }
+    return JNI_TRUE;
 }
 
 JNIEXPORT void JNICALL
@@ -477,6 +524,10 @@ Java_com_termux_x11_WaylandCmdEntryPoint_stop(JNIEnv *env, jclass clazz) {
         g_wayland_socket_fd = -1;
     }
     atomic_store(&g_wayland_socket_handed_off, 0);
+    if (g_cmd_xwayland) {
+        lorie_xwayland_shutdown(g_cmd_xwayland);
+        g_cmd_xwayland = NULL;
+    }
     if (g_compositor) {
         lorie_compositor_stop(g_compositor);
         lorie_compositor_destroy(g_compositor);

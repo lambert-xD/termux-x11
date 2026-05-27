@@ -202,37 +202,81 @@ static pid_t spawn_xwayland(struct lorie_xwayland *xw) {
     argv[argc++] = "tcp";
     argv[argc] = NULL;
 
-    /* Register SIGCHLD handler BEFORE fork to avoid race. */
-    struct wl_event_loop *loop = wl_display_get_event_loop(xw->compositor->display);
-    if (!loop) {
+    /* Register SIGCHLD handler BEFORE fork when a compositor loop exists.
+     * Command-side launches do not own a Wayland event loop; shutdown will
+     * reap the child there. */
+    if (xw->compositor && xw->compositor->display) {
+        struct wl_event_loop *loop = wl_display_get_event_loop(xw->compositor->display);
+        if (!loop) {
+            free(bin);
+            return -1;
+        }
+        xw->sigchld_source = wl_event_loop_add_signal(loop, SIGCHLD, sigchld_handler, xw);
+        if (!xw->sigchld_source) {
+            free(bin);
+            return -1;
+        }
+    }
+
+    int exec_pipe[2] = {-1, -1};
+    if (pipe(exec_pipe) != 0) {
+        if (xw->sigchld_source) {
+            wl_event_source_remove(xw->sigchld_source);
+            xw->sigchld_source = NULL;
+        }
         free(bin);
         return -1;
     }
-    xw->sigchld_source = wl_event_loop_add_signal(loop, SIGCHLD, sigchld_handler, xw);
-    if (!xw->sigchld_source) {
-        free(bin);
-        return -1;
-    }
+    fcntl(exec_pipe[0], F_SETFD, FD_CLOEXEC);
+    fcntl(exec_pipe[1], F_SETFD, FD_CLOEXEC);
 
     pid_t pid = fork();
     if (pid < 0) {
-        wl_event_source_remove(xw->sigchld_source);
-        xw->sigchld_source = NULL;
+        close(exec_pipe[0]);
+        close(exec_pipe[1]);
+        if (xw->sigchld_source) {
+            wl_event_source_remove(xw->sigchld_source);
+            xw->sigchld_source = NULL;
+        }
         free(bin);
         return -1;
     }
     if (pid == 0) {
+        close(exec_pipe[0]);
         close(xw->wm_fd[0]);
         if (clear_cloexec(xw->abstract_fd) < 0 ||
             clear_cloexec(xw->unix_fd) < 0 ||
             clear_cloexec(xw->wm_fd[1]) < 0) {
+            int err = errno;
+            (void)write(exec_pipe[1], &err, sizeof(err));
             _exit(127);
         }
         setenv("DISPLAY", display_str, 1);
         signal(SIGCHLD, SIG_DFL);
         execvp(bin, argv);
+        int err = errno;
+        (void)write(exec_pipe[1], &err, sizeof(err));
         _exit(127);
     }
+
+    close(exec_pipe[1]);
+    int exec_errno = 0;
+    ssize_t n;
+    do {
+        n = read(exec_pipe[0], &exec_errno, sizeof(exec_errno));
+    } while (n < 0 && errno == EINTR);
+    close(exec_pipe[0]);
+    if (n > 0) {
+        loge("Failed to exec XWayland %s: %s", bin, strerror(exec_errno));
+        if (xw->sigchld_source) {
+            wl_event_source_remove(xw->sigchld_source);
+            xw->sigchld_source = NULL;
+        }
+        waitpid(pid, NULL, 0);
+        free(bin);
+        return -1;
+    }
+
     free(bin);
     close(xw->wm_fd[1]);
     xw->wm_fd[1] = -1;
@@ -242,7 +286,6 @@ static pid_t spawn_xwayland(struct lorie_xwayland *xw) {
 int lorie_xwayland_launch(struct lorie_xwayland *xw) {
     if (!xw || xw->running) return -1;
     if (xw->display_number < 0) return -1;
-    if (!xw->compositor || !xw->compositor->display) return -1;
     if (xw->abstract_fd < 0 || xw->unix_fd < 0 || xw->wm_fd[1] < 0) return -1;
 
     xw->pid = spawn_xwayland(xw);
