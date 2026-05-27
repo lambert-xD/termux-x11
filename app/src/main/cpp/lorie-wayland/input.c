@@ -181,7 +181,14 @@ static void update_pointer_focus(struct lorie_input *in, float x, float y) {
 
 static void update_touch_focus(struct lorie_input *in, float x, float y) {
     struct lorie_surface *new_focus = find_surface_at_point(in->compositor, x, y);
-    if (new_focus) in->touch_focus = new_focus;
+    if (!new_focus) return;
+
+    in->touch_focus = new_focus;
+    if (in->keyboard_focus != new_focus) {
+        if (in->keyboard_focus) send_keyboard_leave(in, in->keyboard_focus);
+        in->keyboard_focus = new_focus;
+        send_keyboard_enter(in, new_focus);
+    }
 }
 
 /* ------------------------------------------------------------------ */

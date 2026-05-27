@@ -114,9 +114,11 @@ static void test_touch_focus_set_on_down(void) {
     struct lorie_surface *s = make_surface(client, 0, 0, 100, 100);
     ASSERT_NOT_NULL(s);
     ASSERT_NULL(in->touch_focus);
+    ASSERT_NULL(in->keyboard_focus);
     lorie_input_touch_down(in, 0, 50.0f, 50.0f);
     lorie_input_dispatch(in);
     ASSERT_EQ_PTR(s, in->touch_focus);
+    ASSERT_EQ_PTR(s, in->keyboard_focus);
     lorie_input_destroy(in);
     lorie_surface_destroy_internal(s);
     wl_client_destroy(client);
