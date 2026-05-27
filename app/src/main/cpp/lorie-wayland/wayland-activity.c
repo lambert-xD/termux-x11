@@ -20,6 +20,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <errno.h>
+#include <pthread.h>
 #include "compositor.h"
 #include "input.h"
 #include "renderer.h"
@@ -39,6 +40,11 @@ static pthread_mutex_t g_jni_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int g_pending_socket_fd = -1;
 static int g_wayland_socket_fd = -1;
 static atomic_int g_wayland_socket_handed_off = 0;
+
+#define MAX_PENDING_WAYLAND_CONNECTIONS 16
+static pthread_mutex_t g_wayland_connection_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int g_pending_wayland_connections[MAX_PENDING_WAYLAND_CONNECTIONS];
+static int g_pending_wayland_connection_count = 0;
 
 static void clipboard_callback(const char *text, size_t len, void *user_data) {
     (void)user_data;
@@ -241,6 +247,42 @@ int lorie_create_wayland_socket(void) {
     return fd;
 }
 
+static void clear_pending_wayland_connections(void) {
+    pthread_mutex_lock(&g_wayland_connection_mutex);
+    for (int i = 0; i < g_pending_wayland_connection_count; i++) {
+        close(g_pending_wayland_connections[i]);
+        g_pending_wayland_connections[i] = -1;
+    }
+    g_pending_wayland_connection_count = 0;
+    pthread_mutex_unlock(&g_wayland_connection_mutex);
+}
+
+static int queue_wayland_connection(int fd) {
+    pthread_mutex_lock(&g_wayland_connection_mutex);
+    if (g_pending_wayland_connection_count >= MAX_PENDING_WAYLAND_CONNECTIONS) {
+        pthread_mutex_unlock(&g_wayland_connection_mutex);
+        close(fd);
+        return -1;
+    }
+    g_pending_wayland_connections[g_pending_wayland_connection_count++] = fd;
+    pthread_mutex_unlock(&g_wayland_connection_mutex);
+    return 0;
+}
+
+static int pop_wayland_connection(void) {
+    pthread_mutex_lock(&g_wayland_connection_mutex);
+    if (g_pending_wayland_connection_count == 0) {
+        pthread_mutex_unlock(&g_wayland_connection_mutex);
+        return -1;
+    }
+    int fd = g_pending_wayland_connections[0];
+    memmove(g_pending_wayland_connections, g_pending_wayland_connections + 1,
+            (size_t)(g_pending_wayland_connection_count - 1) * sizeof(g_pending_wayland_connections[0]));
+    g_pending_wayland_connection_count--;
+    pthread_mutex_unlock(&g_wayland_connection_mutex);
+    return fd;
+}
+
 int lorie_setup_wayland_runtime_dir(void) {
     const char *xdg_runtime = getenv("XDG_RUNTIME_DIR");
     const char *tmpdir = getenv("TMPDIR");
@@ -383,6 +425,15 @@ Java_com_termux_x11_WaylandEntryPoint_setSocketFd(JNIEnv *env, jclass clazz, jin
     }
 }
 
+JNIEXPORT void JNICALL
+Java_com_termux_x11_WaylandEntryPoint_addClientFd(JNIEnv *env, jclass clazz, jint fd) {
+    (void)env; (void)clazz;
+    if (fd < 0)
+        return;
+    if (!g_compositor || lorie_compositor_add_client_fd(g_compositor, fd) != 0)
+        LOGE("Failed to enqueue bridged Wayland client fd");
+}
+
 /* Helper: check whether the Activity-owned Wayland socket is ready. */
 int lorie_wayland_socket_ready(void) {
     const char *xdg_runtime = getenv("XDG_RUNTIME_DIR");
@@ -403,12 +454,12 @@ JNIEXPORT jboolean JNICALL
 Java_com_termux_x11_WaylandCmdEntryPoint_start(JNIEnv *env, jclass clazz,
                                                jobjectArray args) {
     (void)env; (void)clazz; (void)args;
-    /* PR3: command process no longer creates a compositor.
-       The Activity process owns the only Wayland compositor.
-       Create the listening socket here so clients in the Termux sandbox
-       can connect via the filesystem path; the fd is handed off to the
-       Activity compositor via getWaylandSocketFd(). */
+    /* The Activity process owns the Wayland compositor, but Android SELinux
+       prevents it from accepting a socket created in the Termux app domain.
+       Keep accept() in the command process and bridge connected fds to the
+       Activity compositor through Binder. */
     atomic_store(&g_wayland_socket_handed_off, 0);
+    clear_pending_wayland_connections();
     if (g_wayland_socket_fd >= 0) {
         close(g_wayland_socket_fd);
         g_wayland_socket_fd = -1;
@@ -436,21 +487,35 @@ Java_com_termux_x11_WaylandCmdEntryPoint_stop(JNIEnv *env, jclass clazz) {
         lorie_renderer_destroy(g_renderer);
         g_renderer = NULL;
     }
+    clear_pending_wayland_connections();
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_termux_x11_WaylandCmdEntryPoint_connected(JNIEnv *env, jclass clazz) {
     (void)env; (void)clazz;
-    /* Command-side readiness starts after the Activity has requested the
-       listener fd; the socket path exists before the Activity is launched. */
-    return (atomic_load(&g_wayland_socket_handed_off) &&
-            lorie_wayland_socket_ready()) ? JNI_TRUE : JNI_FALSE;
+    return lorie_wayland_socket_ready() ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jobject JNICALL
 Java_com_termux_x11_WaylandCmdEntryPoint_getWaylandConnection(JNIEnv *env, jobject thiz) {
-    (void)env; (void)thiz;
-    return NULL;
+    (void)thiz;
+    int fd = pop_wayland_connection();
+    if (fd < 0) return NULL;
+
+    jclass ParcelFileDescriptorClass = (*env)->FindClass(env, "android/os/ParcelFileDescriptor");
+    if (!ParcelFileDescriptorClass) {
+        close(fd);
+        return NULL;
+    }
+    jmethodID adoptFd = (*env)->GetStaticMethodID(env, ParcelFileDescriptorClass, "adoptFd", "(I)Landroid/os/ParcelFileDescriptor;");
+    if (!adoptFd) {
+        close(fd);
+        return NULL;
+    }
+    jobject pfd = (*env)->CallStaticObjectMethod(env, ParcelFileDescriptorClass, adoptFd, fd);
+    if (!pfd || (*env)->ExceptionCheck(env))
+        close(fd);
+    return pfd;
 }
 
 JNIEXPORT jobject JNICALL
@@ -497,7 +562,23 @@ Java_com_termux_x11_WaylandCmdEntryPoint_getLogcatOutput(JNIEnv *env, jobject th
 JNIEXPORT void JNICALL
 Java_com_termux_x11_WaylandCmdEntryPoint_listenForConnections(JNIEnv *env, jobject thiz) {
     (void)env; (void)thiz;
-    /* No-op for PR 1/2; Wayland compositor runs in Activity process.
-       The command process does not own the Wayland socket.
-       Future PR 3 may add IPC bridge logic here. */
+    while (g_wayland_socket_fd >= 0) {
+        int fd = accept(g_wayland_socket_fd, NULL, NULL);
+        if (fd < 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EBADF || errno == EINVAL)
+                return;
+            LOGE("Failed to accept Wayland client in command process: %s", strerror(errno));
+            usleep(100000);
+            continue;
+        }
+        if (fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) {
+            LOGE("Failed to set CLOEXEC on Wayland client fd: %s", strerror(errno));
+            close(fd);
+            continue;
+        }
+        if (queue_wayland_connection(fd) != 0)
+            LOGE("Dropped Wayland client: pending connection queue is full");
+    }
 }

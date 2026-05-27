@@ -9,6 +9,8 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <limits.h>
+#include <fcntl.h>
+#include <errno.h>
 
 #define LOG_TAG "LorieCompositor"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -294,6 +296,8 @@ struct lorie_compositor *lorie_compositor_create(void) {
     }
 
     c->socket_fd = -1;
+    c->client_fd_pipe[0] = -1;
+    c->client_fd_pipe[1] = -1;
 
     c->data_device_manager_global = lorie_data_device_manager_create(c->display, c);
     if (!c->data_device_manager_global) {
@@ -364,11 +368,70 @@ void lorie_compositor_destroy(struct lorie_compositor *c) {
         close(c->socket_fd);
         c->socket_fd = -1;
     }
+    if (c->client_fd_source) {
+        wl_event_source_remove(c->client_fd_source);
+        c->client_fd_source = NULL;
+    }
+    if (c->client_fd_pipe[0] >= 0) {
+        close(c->client_fd_pipe[0]);
+        c->client_fd_pipe[0] = -1;
+    }
+    if (c->client_fd_pipe[1] >= 0) {
+        close(c->client_fd_pipe[1]);
+        c->client_fd_pipe[1] = -1;
+    }
 
     pthread_mutex_destroy(&c->lock);
 
     free(c);
     LOGI("Compositor destroyed");
+}
+
+static int client_fd_event(int fd, uint32_t mask, void *data) {
+    struct lorie_compositor *c = data;
+    if (!c || (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR)))
+        return 0;
+
+    for (;;) {
+        int client_fd = -1;
+        ssize_t n = read(fd, &client_fd, sizeof(client_fd));
+        if (n == 0)
+            return 0;
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                return 0;
+            LOGE("Failed to read queued Wayland client fd: %s", strerror(errno));
+            return 0;
+        }
+        if (n != (ssize_t)sizeof(client_fd)) {
+            LOGE("Short read while receiving Wayland client fd");
+            return 0;
+        }
+        if (!wl_client_create(c->display, client_fd)) {
+            LOGE("Failed to create Wayland client from accepted fd");
+            close(client_fd);
+        } else {
+            LOGI("Accepted bridged Wayland client");
+        }
+    }
+}
+
+int lorie_compositor_add_client_fd(struct lorie_compositor *c, int fd) {
+    if (!c || fd < 0)
+        return -1;
+    if (c->client_fd_pipe[1] < 0) {
+        close(fd);
+        return -1;
+    }
+    ssize_t n = write(c->client_fd_pipe[1], &fd, sizeof(fd));
+    if (n != (ssize_t)sizeof(fd)) {
+        LOGE("Failed to queue Wayland client fd: %s", strerror(errno));
+        close(fd);
+        return -1;
+    }
+    return 0;
 }
 
 static void *event_loop_thread_fn(void *data) {
@@ -377,6 +440,7 @@ static void *event_loop_thread_fn(void *data) {
         wl_event_loop_dispatch(c->event_loop, 16);
         if (atomic_load(&c->running) && c->renderer)
             lorie_renderer_commit(c->renderer);
+        wl_display_flush_clients(c->display);
     }
     return NULL;
 }
@@ -428,6 +492,29 @@ int lorie_compositor_start(struct lorie_compositor *c) {
         }
     }
 
+    if (c->client_fd_pipe[0] < 0) {
+        if (pipe(c->client_fd_pipe) != 0) {
+            LOGE("Failed to create Wayland client bridge pipe: %s", strerror(errno));
+            c->client_fd_pipe[0] = -1;
+            c->client_fd_pipe[1] = -1;
+            return -1;
+        }
+        fcntl(c->client_fd_pipe[0], F_SETFD, FD_CLOEXEC);
+        fcntl(c->client_fd_pipe[1], F_SETFD, FD_CLOEXEC);
+        fcntl(c->client_fd_pipe[0], F_SETFL, O_NONBLOCK);
+        fcntl(c->client_fd_pipe[1], F_SETFL, O_NONBLOCK);
+        c->client_fd_source = wl_event_loop_add_fd(c->event_loop,
+            c->client_fd_pipe[0], WL_EVENT_READABLE, client_fd_event, c);
+        if (!c->client_fd_source) {
+            LOGE("Failed to add Wayland client bridge source");
+            close(c->client_fd_pipe[0]);
+            close(c->client_fd_pipe[1]);
+            c->client_fd_pipe[0] = -1;
+            c->client_fd_pipe[1] = -1;
+            return -1;
+        }
+    }
+
     atomic_store(&c->running, 1);
     if (pthread_create(&c->event_loop_thread, NULL,
                        event_loop_thread_fn, c) != 0) {
@@ -450,6 +537,19 @@ void lorie_compositor_stop(struct lorie_compositor *c) {
     /* Destroy clients after the event/render loop is stopped so surface
      * teardown cannot race renderer_commit() surface traversal. */
     wl_display_destroy_clients(c->display);
+
+    if (c->client_fd_source) {
+        wl_event_source_remove(c->client_fd_source);
+        c->client_fd_source = NULL;
+    }
+    if (c->client_fd_pipe[0] >= 0) {
+        close(c->client_fd_pipe[0]);
+        c->client_fd_pipe[0] = -1;
+    }
+    if (c->client_fd_pipe[1] >= 0) {
+        close(c->client_fd_pipe[1]);
+        c->client_fd_pipe[1] = -1;
+    }
 
     LOGI("Compositor stopped");
 }

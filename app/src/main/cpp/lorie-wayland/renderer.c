@@ -229,6 +229,10 @@ void lorie_renderer_set_window(struct lorie_renderer *r, ANativeWindow *window) 
             return;
         }
         eglMakeCurrent(r->egl_display, r->egl_surface, r->egl_surface, r->egl_context);
+        EGLint surface_w = 0, surface_h = 0;
+        eglQuerySurface(r->egl_display, r->egl_surface, EGL_WIDTH, &surface_w);
+        eglQuerySurface(r->egl_display, r->egl_surface, EGL_HEIGHT, &surface_h);
+        glViewport(0, 0, surface_w, surface_h);
         eglSwapInterval(r->egl_display, 1);
         if (!r->program) {
             r->program = create_program(vertex_shader_src, fragment_shader_src);
@@ -394,10 +398,10 @@ static void compute_transform_matrix(struct lorie_surface *s, float *M) {
     float srf10 = sy * rf10;
     float srf11 = sy * rf11;
 
-    M[0]  = srf00;  M[4]  = srf01;  M[8]  = 0.0f;  M[12] = 0.0f;
-    M[1]  = srf10;  M[5]  = srf11;  M[9]  = 0.0f;  M[13] = 0.0f;
+    M[0]  = srf00;  M[4]  = srf01;  M[8]  = 0.0f;  M[12] = tx;
+    M[1]  = srf10;  M[5]  = srf11;  M[9]  = 0.0f;  M[13] = ty;
     M[2]  = 0.0f;   M[6]  = 0.0f;   M[10] = 1.0f;  M[14] = 0.0f;
-    M[3]  = tx;     M[7]  = ty;     M[11] = 0.0f;  M[15] = 1.0f;
+    M[3]  = 0.0f;   M[7]  = 0.0f;   M[11] = 0.0f;  M[15] = 1.0f;
 }
 
 static int cmp_z(const void *a, const void *b) {
@@ -495,10 +499,21 @@ int lorie_renderer_commit(struct lorie_renderer *r) {
                 continue;
             }
             pixman_box32_t *bbox = pixman_region32_extents(&rs->accumulated_damage);
+            int32_t out_w, out_h;
+            get_output_size(s, &out_w, &out_h);
+            int scissor_x = s->x + bbox->x1;
+            int scissor_y = out_h - (s->y + bbox->y2);
+            int scissor_w = bbox->x2 - bbox->x1;
+            int scissor_h = bbox->y2 - bbox->y1;
+            if (scissor_x < 0) scissor_x = 0;
+            if (scissor_y < 0) scissor_y = 0;
+            if (scissor_x + scissor_w > out_w) scissor_w = out_w - scissor_x;
+            if (scissor_y + scissor_h > out_h) scissor_h = out_h - scissor_y;
+            if (scissor_w <= 0 || scissor_h <= 0)
+                continue;
             glUniformMatrix4fv(r->u_transform, 1, GL_FALSE, rs->transform);
             glEnable(GL_SCISSOR_TEST);
-            glScissor(bbox->x1, bbox->y1,
-                      bbox->x2 - bbox->x1, bbox->y2 - bbox->y1);
+            glScissor(scissor_x, scissor_y, scissor_w, scissor_h);
             rs->was_drawn = 1;
             glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
             glDisable(GL_SCISSOR_TEST);

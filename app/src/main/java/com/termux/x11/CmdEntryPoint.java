@@ -171,6 +171,7 @@ public class CmdEntryPoint extends ICmdEntryInterface.Stub {
     public native ParcelFileDescriptor getXConnection();
     public native ParcelFileDescriptor getLogcatOutput();
     public ParcelFileDescriptor getWaylandSocketFd() { return null; }
+    public ParcelFileDescriptor getWaylandConnection() { return null; }
     private static native boolean connected();
     private native void listenForConnections();
 

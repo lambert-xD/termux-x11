@@ -5,4 +5,5 @@ interface ICmdEntryInterface {
     ParcelFileDescriptor getXConnection();
     ParcelFileDescriptor getLogcatOutput();
     ParcelFileDescriptor getWaylandSocketFd();
+    ParcelFileDescriptor getWaylandConnection();
 }

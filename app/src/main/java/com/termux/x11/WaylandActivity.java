@@ -12,29 +12,35 @@ import android.util.Log;
 import android.view.Window;
 
 public class WaylandActivity extends Activity {
+    private Thread connectionBridgeThread;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         setContentView(R.layout.wayland_activity);
         findViewById(R.id.exit_button).setOnClickListener(v -> finish());
-        handleStartIntent(getIntent());
         WaylandEntryPoint.start(new String[]{});
+        handleStartIntent(getIntent());
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        handleStartIntent(intent);
         WaylandEntryPoint.start(new String[]{});
+        handleStartIntent(intent);
     }
 
     @Override protected void onDestroy() {
+        if (connectionBridgeThread != null) {
+            connectionBridgeThread.interrupt();
+            connectionBridgeThread = null;
+        }
         super.onDestroy();
         WaylandEntryPoint.stop();
     }
 
-    private static void handleStartIntent(Intent intent) {
+    private void handleStartIntent(Intent intent) {
         if (intent == null) return;
         Bundle bundle = intent.getBundleExtra(null);
         if (bundle == null) return;
@@ -42,14 +48,30 @@ public class WaylandActivity extends Activity {
         if (binder == null) return;
 
         ICmdEntryInterface iface = ICmdEntryInterface.Stub.asInterface(binder);
-        try {
-            ParcelFileDescriptor pfd = iface.getWaylandSocketFd();
-            if (pfd != null) {
-                WaylandEntryPoint.setSocketFd(pfd.detachFd());
+        startConnectionBridge(iface);
+    }
+
+    private synchronized void startConnectionBridge(ICmdEntryInterface iface) {
+        if (connectionBridgeThread != null && connectionBridgeThread.isAlive()) return;
+
+        connectionBridgeThread = new Thread(() -> {
+            while (!Thread.currentThread().isInterrupted()) {
+                try {
+                    ParcelFileDescriptor pfd = iface.getWaylandConnection();
+                    if (pfd != null) {
+                        WaylandEntryPoint.addClientFd(pfd.detachFd());
+                    } else {
+                        Thread.sleep(50);
+                    }
+                } catch (RemoteException e) {
+                    Log.e("WaylandActivity", "Wayland connection bridge lost", e);
+                    return;
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
-        } catch (RemoteException e) {
-            Log.e("WaylandActivity", "Failed to get Wayland socket fd", e);
-        }
+        }, "WaylandConnectionBridge");
+        connectionBridgeThread.start();
     }
 
     public static class StartReceiver extends BroadcastReceiver {
