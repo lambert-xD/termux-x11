@@ -1,12 +1,9 @@
 strict_tdd: true
 context: |
-  termux-x11 is a Java/Gradle project.
-  Detected markers: build.gradle, GitHub Actions.
-  Additional evidence: Java/Gradle manifest detected via build.gradle.
-  Primary test command: ./gradlew test.
-  Unit tests: Gradle test (./gradlew test).
-  Integration tests: none.
-  E2E tests: none.
+  termux-x11 is an Android Gradle app wrapping a Wayland compositor & X11 server.
+  Primary test runner: ./gradlew test (Gradle).
+  No unit/integration/E2E test files currently present.
+  Quality tools: Android Lint via ./gradlew lint. Type check via compilation.
 rules:
   proposal:
     require_problem_statement: true
@@ -21,7 +18,7 @@ rules:
   verify:
     test_command: "./gradlew test"
 testing:
-  detected: "2026-05-20"
+  detected: "2026-06-07"
   runner:
     command: "./gradlew test"
     framework: "Gradle test"
@@ -43,12 +40,14 @@ testing:
     commands:
       []
 quality:
-  lint: ""
+  lint: "Android Lint"
   lint_commands:
-    []
-  typecheck: ""
+    - scope: "."
+      command: "./gradlew lint"
+  typecheck: "Kotlin/Java Compiler"
   typecheck_commands:
-    []
+    - scope: "."
+      command: "./gradlew compileDebugSources"
   format: ""
   format_commands:
     []

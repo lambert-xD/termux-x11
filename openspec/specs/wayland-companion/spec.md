@@ -41,6 +41,18 @@ The system MUST provide a `termux-wayland` shell script, installable via the `te
 - WHEN `app_process` launches `com.termux.x11.Loader`
 - THEN `TERMUX_X11_LOADER_OVERRIDE_CMDENTRYPOINT_CLASS` is set to `com.termux.x11.WaylandCmdEntryPoint` so the Loader invokes the Wayland entrypoint instead of the X11 entrypoint
 
+#### Scenario: termux-wayland defaults to pure Wayland mode
+
+- GIVEN the user runs `termux-wayland`
+- WHEN the script starts
+- THEN the script passes `--pure-wayland` to `WaylandCmdEntryPoint` by default
+
+#### Scenario: termux-x11 defaults to XWayland-backed mode
+
+- GIVEN the user runs `termux-x11`
+- WHEN the script starts
+- THEN the script passes `-xwayland` to `WaylandCmdEntryPoint` by default
+
 #### Scenario: RED test — script missing
 
 - GIVEN `termux-wayland` is not installed
@@ -76,6 +88,18 @@ The system MUST provide a `WaylandCmdEntryPoint` Java class modeled on `CmdEntry
 - GIVEN `WaylandCmdEntryPoint` runs outside the app process via `app_process`
 - WHEN the static initializer executes
 - THEN it creates a `Context` using the same reflection-based `createContext()` pattern as `CmdEntryPoint`, loads `libXlorie.so` from the APK, and prepares the main `Looper`
+
+#### Scenario: Entrypoint parses `--pure-wayland` flag
+
+- GIVEN `WaylandCmdEntryPoint` is executed with `--pure-wayland`
+- WHEN native start is invoked
+- THEN the selected mode is passed to JNI, and XWayland is not spawned
+
+#### Scenario: Entrypoint parses `-xwayland` flag
+
+- GIVEN `WaylandCmdEntryPoint` is executed with `-xwayland`
+- WHEN native start is invoked
+- THEN the selected mode is passed to JNI, and XWayland is spawned
 
 #### Scenario: RED test — class stripped by ProGuard
 
@@ -119,10 +143,17 @@ The system MUST include a ProGuard keep rule for `WaylandCmdEntryPoint` so it su
 
 The system MUST determine `XDG_RUNTIME_DIR` using the following precedence, and MUST create the directory with mode `0700` before socket creation:
 
-1. Existing `XDG_RUNTIME_DIR` environment variable (if set and non-empty).
-2. Existing `TMPDIR` environment variable (if set and non-empty).
-3. Termux `$PREFIX/tmp` (i.e., `/data/data/com.termux/files/usr/tmp`) if accessible.
-4. `/tmp` as a final fallback.
+1. JNI-provided app-private files directory path (if passed and valid).
+2. Existing `XDG_RUNTIME_DIR` environment variable (if set and non-empty).
+3. Existing `TMPDIR` environment variable (if set and non-empty).
+4. Termux `$PREFIX/tmp` if accessible.
+5. `/tmp` as a final fallback.
+
+#### Scenario: JNI path passed from WaylandActivity
+
+- GIVEN `WaylandActivity` starts the compositor and passes `getFilesDir().getAbsolutePath()` to native start
+- WHEN the native layer initializes
+- THEN the runtime dir is set to that app-private directory, created with mode `0700`, and the socket is created there
 
 #### Scenario: XDG_RUNTIME_DIR already set
 
@@ -292,15 +323,59 @@ The system MUST NOT implement a command-process compositor (where the compositor
 | `./build_termux_package` | CI / local | Integration | Package contains `termux-wayland` script |
 | `test_x11_flow_unregressed` | `test_x11_regression.sh` (existing) | Integration | `termux-x11` command and X11 mode still work |
 
+### Requirement: XDG-Shell Configure Lifecycle
+
+The compositor SHALL send the initial configure event immediately upon surface role assignment during the `xdg_surface.get_toplevel` and `xdg_surface.get_popup` requests. The client MUST acknowledge this configure event using `xdg_surface.ack_configure` before committing the surface, though the compositor SHALL fallback to a standard configuration flow if needed for compatibility.
+
+#### Scenario: Initial configure sent on get_toplevel
+- GIVEN a client has bound to `xdg_shell` and created an `xdg_surface`
+- WHEN the client requests a toplevel role by calling `xdg_surface.get_toplevel`
+- THEN the compositor SHALL immediately send an initial configure event to the client
+- AND the compositor SHALL set the `configured` flag for the surface to indicate it has been configured
+
+#### Scenario: Initial configure sent on get_popup
+- GIVEN a client has bound to `xdg_shell` and created an `xdg_surface`
+- WHEN the client requests a popup role by calling `xdg_surface.get_popup`
+- THEN the compositor SHALL immediately send an initial configure event to the client
+- AND the compositor SHALL set the `configured` flag for the surface to indicate it has been configured
+
+#### Scenario: Acknowledged configure commit lifecycle
+- GIVEN a surface has been assigned an `xdg_surface` role and the initial configure event was sent
+- WHEN the client sends `xdg_surface.ack_configure` followed by `wl_surface.commit`
+- THEN the compositor SHALL process the commit and map the surface without protocol deadlock
+
+---
+
+### Requirement: XDG-Shell Surface Role Presence Validation
+
+The compositor MUST validate that an `xdg_surface` has been assigned a role (either toplevel or popup) when a commit is performed on its associated `wl_surface`. If no role is assigned at the time of commit, the compositor MUST raise a protocol error.
+
+#### Scenario: Surface commit without role raises protocol error
+- GIVEN an `xdg_surface` is created from a `wl_surface` but no role has been assigned
+- WHEN the client performs a `wl_surface.commit` on the surface
+- THEN the compositor SHALL raise an `XDG_SURFACE_ERROR_NOT_CONSTRUCTED` protocol error
+- AND the client connection SHALL be terminated
+
+#### Scenario: Surface commit with role succeeds
+- GIVEN an `xdg_surface` is created and assigned a role via `xdg_surface.get_toplevel`
+- WHEN the client performs a `wl_surface.commit` on the surface
+- THEN the compositor SHALL successfully process the commit without raising any protocol error
+
+---
+
 ## Acceptance Criteria
 
 1. `termux-wayland` script is installable via `termux-x11-nightly` and executable from Termux shell.
-2. Running `termux-wayland` launches `WaylandCmdEntryPoint` via `Loader`, sets `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY`, and creates a socket at `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY`.
-3. A Wayland client (e.g., `weston-terminal` or `foot`) launched from the same shell can connect to the socket.
-4. `WaylandActivity` displays the compositor output when launched (either by the command or manually).
-5. `proot-distro` with `--shared-tmp` can see and connect to the Wayland socket.
-6. chroot with bound `/tmp` can see and connect to the Wayland socket.
-7. `-xstartup` executes the provided command after socket readiness.
-8. No regressions in existing X11 `termux-x11` flow.
-9. `WaylandCmdEntryPoint` survives R8/ProGuard shrinking with explicit keep rules.
-10. No attempt to implement cross-process `Surface` handoff occurs without an approved design gate document.
+2. Running `termux-wayland` without flags defaults to pure Wayland mode (passing `--pure-wayland`), launches `WaylandCmdEntryPoint` via `Loader`, sets `XDG_RUNTIME_DIR` and `WAYLAND_DISPLAY`, and creates a socket at `$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY`.
+3. Running `termux-x11` without flags defaults to XWayland mode (passing `-xwayland`).
+4. A Wayland client (e.g., `weston-terminal` or `foot`) launched from the same shell can connect to the socket.
+5. `WaylandActivity` passes its app-private files directory path via JNI to set `XDG_RUNTIME_DIR` inside the sandboxed process, displaying the compositor output when launched (either by the command or manually).
+6. `proot-distro` with `--shared-tmp` can see and connect to the Wayland socket.
+7. chroot with bound `/tmp` can see and connect to the Wayland socket.
+8. `-xstartup` executes the provided command after socket readiness.
+9. No regressions in existing X11 `termux-x11` flow.
+10. `WaylandCmdEntryPoint` survives R8/ProGuard shrinking with explicit keep rules.
+11. No attempt to implement cross-process `Surface` handoff occurs without an approved design gate document.
+12. Compositor runs and launches without permission/directory creation crashes under both startup modes.
+13. The compositor sends initial configure events immediately upon surface role assignment (toplevel or popup).
+14. The compositor validates role presence on surface commit, raising `XDG_SURFACE_ERROR_NOT_CONSTRUCTED` if missing.
