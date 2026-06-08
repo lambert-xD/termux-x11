@@ -14,6 +14,7 @@ struct lorie_output;
 struct lorie_surface;
 struct lorie_region;
 struct lorie_clipboard;
+struct lorie_xwayland_surface;
 struct lorie_xdg_surface {
     struct wl_resource *resource;
     struct lorie_surface *surface;
@@ -48,6 +49,7 @@ struct lorie_compositor {
     struct wl_global *linux_dmabuf_global;
     struct wl_global *data_device_manager_global;
     struct wl_global *viewporter_global;
+    struct wl_global *xwayland_shell_global;
     struct lorie_clipboard *clipboard;
     struct wl_list outputs;
     struct wl_list surfaces;
@@ -79,6 +81,7 @@ struct wl_global *lorie_xdg_shell_create(struct wl_display *display);
 struct wl_global *lorie_linux_dmabuf_create(struct wl_display *display, struct lorie_compositor *compositor);
 struct wl_global *lorie_data_device_manager_create(struct wl_display *display, struct lorie_compositor *c);
 struct wl_global *lorie_viewporter_create(struct wl_display *display);
+struct wl_global *lorie_xwayland_shell_create(struct wl_display *display);
 
 /* Notify Wayland clients of Android clipboard changes */
 void lorie_clipboard_send_android_selection(struct lorie_compositor *c);
@@ -110,6 +113,13 @@ void lorie_output_destroy(struct lorie_output *output);
 void lorie_output_update_size(struct lorie_output *output,
                                int32_t w, int32_t h, int32_t scale);
 
+/* xwayland surface role */
+struct lorie_xwayland_surface {
+    struct wl_resource *resource;
+    struct lorie_surface *surface;
+    uint64_t serial;
+};
+
 /* Surface types (defined in surface.c) */
 struct lorie_frame_callback {
     struct wl_list link;
@@ -136,6 +146,7 @@ struct lorie_surface {
     void *buffer; /* LorieBuffer* — imported from wl_shm_buffer */
     struct wl_resource *viewport_resource;
     struct lorie_xdg_surface *xdg_surface;
+    struct lorie_xwayland_surface *xwayland_surface;
     struct {
         double src_x, src_y, src_w, src_h;
         int has_src;
@@ -204,11 +215,49 @@ uint64_t lorie_clipboard_get_timestamp(struct lorie_clipboard *cb);
 void lorie_clipboard_set_last_source(struct lorie_clipboard *cb, enum lorie_clipboard_source src);
 void lorie_clipboard_set_timestamp(struct lorie_clipboard *cb, uint64_t ts);
 
-/* Internal API — exposed for tests */
+/* Internal API — exposed for tests
+ *
+ * Thread-affinity contract (compositor-teardown-safety): lorie_surface_destroy_internal
+ * (and the wl_client_destroy of a compositor-owned client reached through it)
+ * mutates wl_client/wl_resource/wl_display state that the event-loop thread
+ * concurrently dispatches and flushes while the compositor is running. Calling
+ * it from any thread other than `c->event_loop_thread` while `c->running` is
+ * true is a data race that corrupts heap state non-deterministically. The only
+ * safe sequences are: (a) it runs ON the event-loop thread (real client
+ * wl_surface.destroy dispatch), (b) the compositor has not started yet
+ * (`c->running == false`, e.g. lorie_surface_create_internal's error path), or
+ * (c) lorie_compositor_stop has already joined the event-loop thread (also
+ * `running == false` afterwards — see lorie_test_safe_destroy_client). Calling
+ * it from any other thread while running is the unsafe pattern this contract
+ * forbids; lorie_compositor_assert_event_loop_thread is the code-enforced
+ * checkpoint that converts a violation into a loud, deterministic abort
+ * instead of silent corruption (test/host builds only — see
+ * LORIE_TEARDOWN_GUARD). */
 struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,
                                                      struct wl_client *client,
                                                      uint32_t id);
 void lorie_surface_destroy_internal(struct lorie_surface *s);
+
+/* Cross-thread teardown guard (compositor-teardown-safety spec).
+ *
+ * Aborts with a diagnostic iff: c is non-NULL AND the compositor is currently
+ * running AND the calling thread is NOT the registered event-loop thread —
+ * i.e. exactly the unsafe pattern described above. No-ops (and never reads
+ * c->event_loop_thread) when c is NULL, when the compositor has not started /
+ * has already been stopped (running == false — event_loop_thread may be
+ * uninitialized before the first lorie_compositor_start), or when called from
+ * the event-loop thread itself.
+ *
+ * Compiled to an empty inline no-op unless LORIE_TEARDOWN_GUARD is defined
+ * (test/host CMake targets only — see tests/CMakeLists.txt). The production
+ * NDK build never defines it, so this call site contributes nothing to the
+ * shipped libXlorie.so: no new abort path, no branch, no symbol reference. */
+#if defined(LORIE_TEARDOWN_GUARD)
+void lorie_compositor_assert_event_loop_thread(struct lorie_compositor *c);
+#else
+static inline void lorie_compositor_assert_event_loop_thread(struct lorie_compositor *c) { (void)c; }
+#endif
+
 void lorie_surface_compute_logical_size(struct lorie_surface *s);
 void surface_commit(struct wl_client *client, struct wl_resource *resource);
 
@@ -216,6 +265,7 @@ void surface_commit(struct wl_client *client, struct wl_resource *resource);
 void lorie_xdg_surface_handle_commit(struct lorie_surface *s, struct wl_client *client);
 void lorie_xdg_surface_send_configure_internal(struct lorie_xdg_surface *xdg_surf, uint32_t serial);
 void lorie_xdg_surface_ack_configure_internal(struct lorie_xdg_surface *xdg_surf, uint32_t serial);
+void lorie_xdg_surface_send_initial_configure(struct lorie_xdg_surface *xdg_surf);
 void xdg_toplevel_handle_resource_destroy(struct wl_resource *resource);
 void xdg_popup_handle_resource_destroy(struct wl_resource *resource);
 

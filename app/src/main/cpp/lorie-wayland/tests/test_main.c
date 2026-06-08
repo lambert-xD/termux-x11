@@ -28,6 +28,7 @@ extern int lorie_test_dmabuf_suite(struct lorie_test_suite* suite);
 extern int lorie_test_clipboard_suite(struct lorie_test_suite* suite);
 extern int lorie_test_shm_buffer_suite(struct lorie_test_suite* suite);
 extern int lorie_test_output_suite(struct lorie_test_suite* suite);
+extern int lorie_test_teardown_guard_suite(struct lorie_test_suite* suite);
 
 int main(int argc, char** argv) {
     struct lorie_test_suite framework_suite;
@@ -47,6 +48,20 @@ int main(int argc, char** argv) {
 
     struct lorie_test_suite renderer_suite;
     lorie_test_renderer_suite(&renderer_suite);
+
+    /* Registered here (right after surface, before input/protocols) so that —
+     * even pre-Phase-3-migration, while LORIE_TEARDOWN_GUARD makes the binary
+     * SIGABRT on the first unmigrated unsafe destroy further down the
+     * registration order — this suite's guard-trip / no-false-positive /
+     * helper tests still get a chance to execute and report in the full
+     * binary's run, maximizing coverage that survives until migration lands.
+     * It is ALSO run via the dedicated isolated runner
+     * (lorie-wayland-teardown-guard-tests / test_teardown_guard_main.c) for a
+     * guaranteed crash-free signal in the meantime — see that file's header
+     * comment for the full isolation rationale (mirrors
+     * test_main_protocols_only.c's precedent for the identical crash symptom). */
+    struct lorie_test_suite teardown_guard_suite;
+    lorie_test_teardown_guard_suite(&teardown_guard_suite);
 
     struct lorie_test_suite input_suite;
     lorie_test_input_suite(&input_suite);
@@ -97,6 +112,7 @@ int main(int argc, char** argv) {
         &compositor_suite,
         &surface_suite,
         &renderer_suite,
+        &teardown_guard_suite,
         &input_suite,
         &keymap_suite,
         &protocols_suite,

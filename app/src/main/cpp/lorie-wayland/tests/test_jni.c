@@ -17,7 +17,7 @@
 /* Helpers exported from wayland-activity.c */
 extern int lorie_clipboard_validate_size(uint32_t count);
 extern int lorie_keycode_valid(int key_code);
-extern int lorie_setup_wayland_runtime_dir(void);
+extern int lorie_setup_wayland_runtime_dir(const char *jni_path);
 extern int lorie_wayland_socket_ready(void);
 extern const int lorie_wayland_native_method_count;
 
@@ -93,6 +93,23 @@ static void test_keycode_unmapped_is_zero(void) {
     ASSERT_EQ_INT(0, android_to_linux_keycode[200]);
 }
 
+static void test_wayland_runtime_dir_prefers_jni_path(void) {
+    char jni_dir[] = "/tmp/lorie_jni_runtime_XXXXXX";
+    char env_dir[] = "/tmp/lorie_env_runtime_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(jni_dir));
+    ASSERT_NOT_NULL(mkdtemp(env_dir));
+
+    setenv("XDG_RUNTIME_DIR", env_dir, 1);
+    unsetenv("WAYLAND_DISPLAY");
+
+    ASSERT_EQ_INT(0, lorie_setup_wayland_runtime_dir(jni_dir));
+    ASSERT_EQ_STR(jni_dir, getenv("XDG_RUNTIME_DIR"));
+    ASSERT_EQ_STR("wayland-0", getenv("WAYLAND_DISPLAY"));
+
+    rmdir(jni_dir);
+    rmdir(env_dir);
+}
+
 static void test_wayland_runtime_dir_prefers_xdg_runtime_dir(void) {
     char dir[] = "/tmp/lorie_xdg_runtime_XXXXXX";
     ASSERT_NOT_NULL(mkdtemp(dir));
@@ -100,7 +117,7 @@ static void test_wayland_runtime_dir_prefers_xdg_runtime_dir(void) {
     setenv("XDG_RUNTIME_DIR", dir, 1);
     unsetenv("WAYLAND_DISPLAY");
 
-    ASSERT_EQ_INT(0, lorie_setup_wayland_runtime_dir());
+    ASSERT_EQ_INT(0, lorie_setup_wayland_runtime_dir(NULL));
     ASSERT_EQ_STR(dir, getenv("XDG_RUNTIME_DIR"));
     ASSERT_EQ_STR("wayland-0", getenv("WAYLAND_DISPLAY"));
 
@@ -115,7 +132,7 @@ static void test_wayland_runtime_dir_falls_back_to_tmpdir(void) {
     unsetenv("WAYLAND_DISPLAY");
     setenv("TMPDIR", dir, 1);
 
-    ASSERT_EQ_INT(0, lorie_setup_wayland_runtime_dir());
+    ASSERT_EQ_INT(0, lorie_setup_wayland_runtime_dir(NULL));
     ASSERT_EQ_STR(dir, getenv("XDG_RUNTIME_DIR"));
     ASSERT_EQ_STR("wayland-0", getenv("WAYLAND_DISPLAY"));
 
@@ -130,7 +147,7 @@ static void test_wayland_runtime_dir_preserves_wayland_display(void) {
     setenv("XDG_RUNTIME_DIR", dir, 1);
     setenv("WAYLAND_DISPLAY", "wayland-7", 1);
 
-    ASSERT_EQ_INT(0, lorie_setup_wayland_runtime_dir());
+    ASSERT_EQ_INT(0, lorie_setup_wayland_runtime_dir(NULL));
     ASSERT_EQ_STR(dir, getenv("XDG_RUNTIME_DIR"));
     ASSERT_EQ_STR("wayland-7", getenv("WAYLAND_DISPLAY"));
 
@@ -180,6 +197,7 @@ int lorie_test_jni_suite(struct lorie_test_suite* suite) {
     SUITE_ADD(suite, test_keycode_a_maps_to_linux_30);
     SUITE_ADD(suite, test_keycode_menu_maps_to_linux_139);
     SUITE_ADD(suite, test_keycode_unmapped_is_zero);
+    SUITE_ADD(suite, test_wayland_runtime_dir_prefers_jni_path);
     SUITE_ADD(suite, test_wayland_runtime_dir_prefers_xdg_runtime_dir);
     SUITE_ADD(suite, test_wayland_runtime_dir_falls_back_to_tmpdir);
     SUITE_ADD(suite, test_wayland_runtime_dir_preserves_wayland_display);

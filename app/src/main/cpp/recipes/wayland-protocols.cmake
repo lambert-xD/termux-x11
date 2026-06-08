@@ -62,6 +62,21 @@ foreach(PROTOCOL ${STABLE_PROTOCOLS})
     endif()
 endforeach()
 
+# Staging protocols
+set(STAGING_PROTOCOLS
+    "${WAYLAND_PROTOCOLS_DIR}/staging/xwayland-shell/xwayland-shell-v1.xml")
+
+foreach(PROTOCOL ${STAGING_PROTOCOLS})
+    if(EXISTS ${PROTOCOL})
+        get_filename_component(PROTOCOL_DIR ${PROTOCOL} DIRECTORY)
+        get_filename_component(PROTOCOL_DIR_NAME ${PROTOCOL_DIR} NAME)
+        get_filename_component(PROTOCOL_PARENT_DIR ${PROTOCOL_DIR} DIRECTORY)
+        get_filename_component(PROTOCOL_PARENT_NAME ${PROTOCOL_PARENT_DIR} NAME)
+        get_filename_component(PROTOCOL_NAME ${PROTOCOL} NAME_WE)
+        wayland_protocol_generate(${PROTOCOL} "${PROTOCOL_PARENT_NAME}-${PROTOCOL_DIR_NAME}-${PROTOCOL_NAME}")
+    endif()
+endforeach()
+
 # Ensure headers are generated before any compilation that includes them
 add_custom_target(wayland-protocols-headers DEPENDS ${WAYLAND_PROTOCOL_HEADERS})
 

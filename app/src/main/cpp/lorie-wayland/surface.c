@@ -104,6 +104,21 @@ void surface_commit(struct wl_client *client,
                     struct wl_resource *resource) {
     struct lorie_surface *s = wl_resource_get_user_data(resource);
 
+    /* xdg-shell: reject commit on a surface without an assigned role.
+     * Must run before the unconfigured-buffer check below, otherwise a
+     * roleless commit that also attaches a buffer would raise the wrong
+     * protocol error (XDG_SURFACE_ERROR_UNCONFIGURED_BUFFER instead of
+     * XDG_SURFACE_ERROR_NOT_CONSTRUCTED). */
+    if (s->xdg_surface && !s->xdg_surface->role) {
+        if (s->xdg_surface->resource)
+            wl_resource_post_error(s->xdg_surface->resource,
+                XDG_SURFACE_ERROR_NOT_CONSTRUCTED,
+                "xdg_surface committed without a role (get_toplevel or get_popup not called)");
+        s->pending_attached = 0;
+        s->pending_buffer = NULL;
+        return;
+    }
+
     /* xdg-shell: reject buffer attach before first configure */
     if (s->xdg_surface && !s->xdg_surface->configured && s->pending_attached) {
         if (s->xdg_surface->resource)
@@ -245,6 +260,10 @@ static void surface_handle_resource_destroy(struct wl_resource *resource) {
         s->xdg_surface->surface = NULL;
         s->xdg_surface = NULL;
     }
+    if (s->xwayland_surface) {
+        s->xwayland_surface->surface = NULL;
+        s->xwayland_surface = NULL;
+    }
     free(s);
 }
 
@@ -282,6 +301,13 @@ struct lorie_surface *lorie_surface_create_internal(struct lorie_compositor *c,
 
 void lorie_surface_destroy_internal(struct lorie_surface *s) {
     if (!s) return;
+    /* compositor-teardown-safety: this is the single internal teardown
+     * chokepoint (wl_resource_destroy / surface_handle_resource_destroy are
+     * reached only through it, or via on-thread client dispatch). Guard
+     * BEFORE any state mutation — see lorie_compositor_assert_event_loop_thread
+     * for the predicate and why `c` is checked first (server-owned surfaces
+     * with s->compositor == NULL must no-op here, not dereference NULL). */
+    lorie_compositor_assert_event_loop_thread(s->compositor);
     if (s->resource)
         wl_resource_destroy(s->resource);
     else {
@@ -292,6 +318,10 @@ void lorie_surface_destroy_internal(struct lorie_surface *s) {
         if (s->xdg_surface) {
             s->xdg_surface->surface = NULL;
             s->xdg_surface = NULL;
+        }
+        if (s->xwayland_surface) {
+            s->xwayland_surface->surface = NULL;
+            s->xwayland_surface = NULL;
         }
         wl_list_remove(&s->link);
         wl_list_remove(&s->subsurface_link);

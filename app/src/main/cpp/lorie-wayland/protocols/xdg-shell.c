@@ -21,6 +21,82 @@ void lorie_xdg_surface_ack_configure_internal(struct lorie_xdg_surface *xdg_surf
         xdg_surf->pending_configure_serial = 0;
 }
 
+/*
+ * lorie_xdg_surface_send_initial_configure
+ *
+ * Sends the initial configure sequence immediately on role assignment (get_toplevel /
+ * get_popup) so that clients do not deadlock waiting for a configure event before
+ * their first commit.  Also sets the `configured` flag so that surface_commit
+ * can proceed normally once the client ack_configures.
+ *
+ * Call this at the end of xdg_surface_get_toplevel and xdg_surface_get_popup,
+ * after `xdg_surf->role` has been set.
+ */
+void lorie_xdg_surface_send_initial_configure(struct lorie_xdg_surface *xdg_surf) {
+    if (!xdg_surf || !xdg_surf->resource || !xdg_surf->role)
+        return;
+    /* Avoid sending a second initial configure if already configured */
+    if (xdg_surf->configured)
+        return;
+
+    struct wl_display *display = wl_client_get_display(
+        wl_resource_get_client(xdg_surf->resource));
+    uint32_t serial = wl_display_next_serial(display);
+
+    /* Send preferred_buffer_scale (wl_surface v6) */
+    if (xdg_surf->surface && xdg_surf->surface->resource) {
+        int32_t scale = 1;
+        if (xdg_surf->surface->compositor &&
+            !wl_list_empty(&xdg_surf->surface->compositor->outputs)) {
+            struct lorie_output *output = wl_container_of(
+                xdg_surf->surface->compositor->outputs.next, output, link);
+            scale = output->scale;
+        }
+        wl_surface_send_preferred_buffer_scale(xdg_surf->surface->resource, scale);
+    }
+
+    /* Send role-specific configure event */
+    if (wl_resource_get_interface(xdg_surf->role) == &xdg_toplevel_interface) {
+        struct lorie_xdg_toplevel *toplevel = wl_resource_get_user_data(xdg_surf->role);
+        if (toplevel && toplevel->resource) {
+            struct wl_array states;
+            wl_array_init(&states);
+            uint32_t *state = wl_array_add(&states, sizeof(uint32_t));
+            if (state) {
+                int32_t tw = 0, th = 0;
+                if (xdg_surf->surface && xdg_surf->surface->compositor &&
+                    !wl_list_empty(&xdg_surf->surface->compositor->outputs)) {
+                    struct lorie_output *out = wl_container_of(
+                        xdg_surf->surface->compositor->outputs.next, out, link);
+                    tw = out->width;
+                    th = out->height;
+                }
+                *state = XDG_TOPLEVEL_STATE_FULLSCREEN;
+                xdg_toplevel_send_configure(toplevel->resource, tw, th, &states);
+            }
+            wl_array_release(&states);
+        }
+    } else if (wl_resource_get_interface(xdg_surf->role) == &xdg_popup_interface) {
+        struct lorie_xdg_popup *popup = wl_resource_get_user_data(xdg_surf->role);
+        if (popup && popup->resource) {
+            int32_t pw = 0, ph = 0;
+            if (xdg_surf->surface && xdg_surf->surface->compositor &&
+                !wl_list_empty(&xdg_surf->surface->compositor->outputs)) {
+                struct lorie_output *out = wl_container_of(
+                    xdg_surf->surface->compositor->outputs.next, out, link);
+                pw = out->width;
+                ph = out->height;
+            }
+            xdg_popup_send_configure(popup->resource, 0, 0, pw, ph);
+            popup->configured = 1;
+        }
+    }
+
+    xdg_surf->configured = 1;
+    xdg_surf->pending_configure_serial = serial;
+    lorie_xdg_surface_send_configure_internal(xdg_surf, serial);
+}
+
 /* Internal: react to surface_commit for xdg surfaces */
 void lorie_xdg_surface_handle_commit(struct lorie_surface *s, struct wl_client *client) {
     if (!client)
@@ -28,8 +104,18 @@ void lorie_xdg_surface_handle_commit(struct lorie_surface *s, struct wl_client *
     if (!s || !s->xdg_surface)
         return;
     struct lorie_xdg_surface *xdg_surf = s->xdg_surface;
+
+    /* Validate role presence — raise protocol error if no role assigned yet */
+    if (!xdg_surf->role) {
+        if (xdg_surf->resource)
+            wl_resource_post_error(xdg_surf->resource,
+                XDG_SURFACE_ERROR_NOT_CONSTRUCTED,
+                "xdg_surface committed without a role (get_toplevel or get_popup not called)");
+        return;
+    }
+
     if (xdg_surf->configured)
-        return; /* only configure on first commit */
+        return; /* already configured via lorie_xdg_surface_send_initial_configure */
 
     struct wl_display *display = wl_client_get_display(client);
     uint32_t serial = wl_display_next_serial(display);
@@ -132,6 +218,8 @@ static void xdg_surface_get_toplevel(struct wl_client *client, struct wl_resourc
                                    xdg_toplevel_handle_resource_destroy);
     toplevel->xdg_surface = xdg_surf;
     xdg_surf->role = toplevel->resource;
+    /* Send initial configure immediately so clients don't deadlock waiting for it */
+    lorie_xdg_surface_send_initial_configure(xdg_surf);
 }
 
 static void xdg_popup_destroy(struct wl_client *client, struct wl_resource *resource) {
@@ -187,6 +275,8 @@ static void xdg_surface_get_popup(struct wl_client *client, struct wl_resource *
     popup->xdg_surface = xdg_surf;
     popup->parent = parent_resource;
     xdg_surf->role = popup->resource;
+    /* Send initial configure immediately so popup clients don't deadlock */
+    lorie_xdg_surface_send_initial_configure(xdg_surf);
 }
 
 static const struct xdg_surface_interface xdg_surface_impl = {

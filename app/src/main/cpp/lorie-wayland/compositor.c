@@ -311,6 +311,12 @@ struct lorie_compositor *lorie_compositor_create(void) {
         goto fail_globals;
     }
 
+    c->xwayland_shell_global = lorie_xwayland_shell_create(c->display);
+    if (!c->xwayland_shell_global) {
+        LOGE("Failed to create xwayland_shell global");
+        goto fail_globals;
+    }
+
     /* wl_output global is created when an output is added */
     c->output_global = NULL;
 
@@ -347,6 +353,8 @@ void lorie_compositor_destroy(struct lorie_compositor *c) {
         wl_global_destroy(c->output_global);
     if (c->viewporter_global)
         wl_global_destroy(c->viewporter_global);
+    if (c->xwayland_shell_global)
+        wl_global_destroy(c->xwayland_shell_global);
     if (c->data_device_manager_global)
         wl_global_destroy(c->data_device_manager_global);
     if (c->linux_dmabuf_global)
@@ -526,6 +534,26 @@ int lorie_compositor_start(struct lorie_compositor *c) {
     LOGI("Compositor started");
     return 0;
 }
+
+#if defined(LORIE_TEARDOWN_GUARD)
+/* Cross-thread teardown guard (compositor-teardown-safety spec).
+ *
+ * IMPORTANT ordering: `running` MUST be checked BEFORE `event_loop_thread` is
+ * read. Before the first lorie_compositor_start() succeeds (or after it fails
+ * to pthread_create), `event_loop_thread` is uninitialized — but `running` is
+ * false in both of those states, so the `&&` short-circuit guarantees we never
+ * read/compare an uninitialized thread id. Trips (LOGE + abort) iff:
+ *   c && atomic_load(&c->running) && !pthread_equal(pthread_self(), c->event_loop_thread)
+ * i.e. exactly: compositor alive, loop running, calling thread is not the loop. */
+void lorie_compositor_assert_event_loop_thread(struct lorie_compositor *c) {
+    if (c && atomic_load(&c->running) && !pthread_equal(pthread_self(), c->event_loop_thread)) {
+        LOGE("FATAL: lorie_surface_destroy_internal called off the event-loop thread "
+             "while compositor running — internal teardown must follow "
+             "lorie_compositor_stop (join) first. See compositor-teardown-safety.");
+        abort();
+    }
+}
+#endif
 
 void lorie_compositor_stop(struct lorie_compositor *c) {
     if (!c || !atomic_load(&c->running))

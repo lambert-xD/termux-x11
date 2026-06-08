@@ -82,4 +82,7 @@ foreach(project xorgproto fontenc md pixman tirpc xshmfence Xdmcp Xau Xfont2 xkb
 endforeach()
 
 # Wayland compositor test runner
-add_subdirectory(lorie-wayland/tests)
+if (NOT ANDROID)
+    add_subdirectory(lorie-wayland/tests)
+endif()
+

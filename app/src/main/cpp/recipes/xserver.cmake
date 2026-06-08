@@ -294,6 +294,7 @@ add_library(Xlorie SHARED
         "lorie-wayland/protocols/linux-dmabuf.c"
         "lorie-wayland/protocols/wl-data-device-manager.c"
         "lorie-wayland/protocols/viewporter.c"
+        "lorie-wayland/protocols/xwayland-shell.c"
         "lorie-wayland/xwayland.c"
         "lorie-wayland/wayland-activity.c"
         "lorie-wayland/clipboard.c"

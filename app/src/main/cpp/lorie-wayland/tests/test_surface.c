@@ -3,6 +3,7 @@
 #include "lorie_test.h"
 #include "../compositor.h"
 #include "../renderer.h"
+#include "lorie_test_teardown.h"
 #include <wayland-server-protocol.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -15,6 +16,35 @@ static void test_surface_create_and_destroy(void) {
     ASSERT_EQ_PTR(c, s->compositor);
     ASSERT_EQ_INT(1, s->buffer_scale);
     lorie_surface_destroy_internal(s);
+    lorie_compositor_destroy(c);
+}
+
+/* 1.7 (compositor-teardown-safety, "Creation-time error-path teardown before
+ * the loop starts proceeds untouched"): lorie_surface_destroy_internal called
+ * on a surface from lorie_compositor_create() WITHOUT lorie_compositor_start
+ * — running == false, event_loop_thread not yet created/joinable — must
+ * proceed exactly as before with no guard trip and no diagnostic. This is
+ * literally the same shape as test_surface_create_and_destroy above (which
+ * has exercised this exact prestart create/destroy pattern unchanged); this
+ * test makes the guard's "must not trip here" contract an explicit, named
+ * assertion of its own per the spec scenario, rather than an incidental
+ * property of an existing test. The predicate
+ * (c && atomic_load(&c->running) && !pthread_equal(...)) short-circuits on
+ * the false `running` BEFORE ever reading the not-yet-meaningful
+ * event_loop_thread — see lorie_compositor_assert_event_loop_thread's ordering
+ * note. Reaching the final assertion alive (no SIGABRT) IS the proof: a
+ * mis-firing guard would have aborted this process before getting here. */
+static void test_prestart_destroy_does_not_trip(void) {
+    struct lorie_compositor *c = lorie_compositor_create();
+    ASSERT_NOT_NULL(c);
+    ASSERT_FALSE(atomic_load(&c->running));
+
+    struct lorie_surface *s = lorie_surface_create_internal(c, NULL, 0);
+    ASSERT_NOT_NULL(s);
+
+    lorie_surface_destroy_internal(s);
+
+    ASSERT_FALSE(atomic_load(&c->running));
     lorie_compositor_destroy(c);
 }
 
@@ -95,10 +125,18 @@ static void test_frame_callback_not_fired_by_commit(void) {
     wl_resource_destroy(cb_res);
     free(fcb);
 
-    lorie_surface_destroy_internal(s);
-    wl_client_destroy(client);
+    /* compositor-teardown-safety: lorie_surface_destroy_internal /
+     * wl_client_destroy must not run cross-thread while the loop is alive
+     * (lorie_compositor_assert_event_loop_thread aborts on the unsafe
+     * pattern observed here — destroy on the test thread while c->running).
+     * lorie_test_safe_destroy_client joins the event-loop thread first
+     * (mirrors lorie_compositor_stop's own join step minus the
+     * wl_display_destroy_clients side effect that would double-destroy this
+     * very client), THEN destroys client+surface together via the
+     * resource-destroy chain — so the explicit lorie_compositor_stop(c)
+     * below it became redundant and has been removed. */
+    lorie_test_safe_destroy_client(c, client);
     close(fds[1]);
-    lorie_compositor_stop(c);
     lorie_compositor_destroy(c);
 }
 
@@ -155,6 +193,7 @@ static void test_surface_unregisters_on_destroy(void) {
 int lorie_test_surface_suite(struct lorie_test_suite *suite) {
     lorie_suite_init(suite, "surface", NULL, NULL);
     SUITE_ADD(suite, test_surface_create_and_destroy);
+    SUITE_ADD(suite, test_prestart_destroy_does_not_trip);
     SUITE_ADD(suite, test_surface_damage_tracks_region);
     SUITE_ADD(suite, test_surface_commit_clears_pending);
     SUITE_ADD(suite, test_region_add_subtract);

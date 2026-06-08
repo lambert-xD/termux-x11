@@ -47,7 +47,19 @@ struct lorie_test_runner {
     int jumping;
 };
 
-static struct lorie_test_runner _lorie_runner = {0, 0, 0, NULL, NULL, {{0}}, 0};
+/* SINGLE shared instance across every translation unit (defined once in
+ * test_framework.c). This MUST have external linkage: assertions fire from
+ * test_*.c TUs (e.g. test_protocols.c) while the runner loop — which owns
+ * `jump`/`jumping` and inspects `passed`/`failed` — lives in the main-driver
+ * TU (test_main.c / test_main_protocols_only.c). If each TU got its own
+ * `static` copy (the previous bug — confirmed via `nm` to produce 21 distinct
+ * `_lorie_runner` symbols in the full binary), a failing ASSERT_* would mutate
+ * a private copy that the runner never observes: `jumping` would read back as
+ * 0, `longjmp` would never fire across the TU boundary, and the test would be
+ * unconditionally reported `[ OK ]` with the summary frozen at
+ * "0 passed, 0 failed, 0 total assertions" — a false-GREEN harness that can
+ * never report a failure. See engram bugfix #163. */
+extern struct lorie_test_runner _lorie_runner;
 
 /* --- Assertions --- */
 
@@ -147,58 +159,20 @@ static inline void lorie_suite_add(struct lorie_test_suite* suite,
 #define SUITE_ADD(suite, fn) \
     lorie_suite_add((suite), #fn, (fn), __FILE__, __LINE__)
 
-/* --- Runner --- */
+/* --- Runner ---
+ *
+ * Declared here, DEFINED ONCE in test_framework.c (single TU). They must NOT
+ * be `static`/`static inline`: the runner loop owns `_lorie_runner.jump` /
+ * `.jumping` and is invoked from the main-driver TU (test_main.c /
+ * test_main_protocols_only.c), while `_LORIE_ASSERT_FAIL` (which calls
+ * `longjmp(_lorie_runner.jump, ...)`) is expanded inside test_*.c TUs (e.g.
+ * test_protocols.c). A single shared definition with external linkage is the
+ * only way `longjmp` can unwind back into `lorie_run_suite`'s `setjmp` across
+ * those TU boundaries. See engram bugfix #163. */
 
-static inline int lorie_run_suite(struct lorie_test_suite* suite) {
-    _lorie_runner.current_suite = suite->name;
-    LOGI("\n[==========] Suite: %s (%d tests)", suite->name, suite->case_count);
+extern int lorie_run_suite(struct lorie_test_suite* suite);
 
-    int suite_failed = 0;
-    for (int i = 0; i < suite->case_count; i++) {
-        struct lorie_test_case* tc = &suite->cases[i];
-        _lorie_runner.current_test = tc->name;
-        _lorie_runner.total++;
-
-        LOGI("[ RUN      ] %s::%s", suite->name, tc->name);
-
-        _lorie_runner.jumping = 1;
-        if (setjmp(_lorie_runner.jump) == 0) {
-            if (suite->setup) suite->setup();
-            tc->fn();
-            if (suite->teardown) suite->teardown();
-            LOGI("[       OK ] %s::%s", suite->name, tc->name);
-        } else {
-            /* Assertion failed and longjmp'd back */
-            if (suite->teardown) suite->teardown();
-            suite_failed++;
-            LOGI("[  FAILED  ] %s::%s", suite->name, tc->name);
-        }
-        _lorie_runner.jumping = 0;
-    }
-
-    LOGI("[==========] Suite: %s done (%d/%d passed)",
-         suite->name, suite->case_count - suite_failed, suite->case_count);
-    return suite_failed;
-}
-
-static inline int lorie_test_main(int argc, char** argv,
-                                   struct lorie_test_suite** suites, int suite_count) {
-    (void)argc; (void)argv;
-    LOGI("========================================");
-    LOGI("  Lorie Wayland Test Runner");
-    LOGI("========================================");
-
-    int total_failed = 0;
-    for (int i = 0; i < suite_count; i++) {
-        total_failed += lorie_run_suite(suites[i]);
-    }
-
-    LOGI("\n========================================");
-    LOGI("  Results: %d passed, %d failed, %d total assertions",
-         _lorie_runner.passed, _lorie_runner.failed, _lorie_runner.passed + _lorie_runner.failed);
-    LOGI("========================================");
-
-    return total_failed > 0 ? 1 : 0;
-}
+extern int lorie_test_main(int argc, char** argv,
+                           struct lorie_test_suite** suites, int suite_count);
 
 #endif /* LORIE_TEST_H */
