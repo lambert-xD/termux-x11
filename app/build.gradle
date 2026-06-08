@@ -4,6 +4,9 @@ android {
     namespace 'com.termux.x11'
     //noinspection GrDeprecatedAPIUsage
     compileSdkVersion 34
+    testOptions {
+        unitTests.returnDefaultValues = true
+    }
     defaultConfig {
         applicationId "com.termux.x11"
         minSdkVersion 26
@@ -51,6 +54,8 @@ dependencies {
     implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.10.0'
     implementation 'androidx.preference:preference:1.2.1'
     compileOnly project(':shell-loader:stub')
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.mockito:mockito-inline:4.11.0'
 }
 afterEvaluate {
     tasks.register("generatePrefs") {

@@ -6,12 +6,15 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.os.DeadObjectException;
 import android.os.ParcelFileDescriptor;
 import android.os.RemoteException;
 import android.util.Log;
 import android.view.Window;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class WaylandActivity extends Activity {
+    private final AtomicReference<ICmdEntryInterface> currentIface = new AtomicReference<>();
     private Thread connectionBridgeThread;
 
     @Override
@@ -21,14 +24,14 @@ public class WaylandActivity extends Activity {
         setContentView(R.layout.wayland_activity);
         findViewById(R.id.lorieView).requestFocus();
         findViewById(R.id.exit_button).setOnClickListener(v -> finish());
-        WaylandEntryPoint.start(new String[]{});
+        WaylandEntryPoint.start(new String[]{}, getFilesDir().getAbsolutePath());
         handleStartIntent(getIntent());
     }
 
     @Override protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        WaylandEntryPoint.start(new String[]{});
+        WaylandEntryPoint.start(new String[]{}, getFilesDir().getAbsolutePath());
         handleStartIntent(intent);
     }
 
@@ -53,20 +56,29 @@ public class WaylandActivity extends Activity {
     }
 
     private synchronized void startConnectionBridge(ICmdEntryInterface iface) {
+        currentIface.set(iface);
         if (connectionBridgeThread != null && connectionBridgeThread.isAlive()) return;
 
         connectionBridgeThread = new Thread(() -> {
             while (!Thread.currentThread().isInterrupted()) {
+                ICmdEntryInterface current = currentIface.get();
+                if (current == null) {
+                    try { Thread.sleep(50); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+                    continue;
+                }
                 try {
-                    ParcelFileDescriptor pfd = iface.getWaylandConnection();
+                    ParcelFileDescriptor pfd = current.getWaylandConnection();
                     if (pfd != null) {
                         WaylandEntryPoint.addClientFd(pfd.detachFd());
                     } else {
                         Thread.sleep(50);
                     }
+                } catch (DeadObjectException e) {
+                    Log.e("WaylandActivity", "Wayland connection died", e);
+                    currentIface.compareAndSet(current, null);
                 } catch (RemoteException e) {
                     Log.e("WaylandActivity", "Wayland connection bridge lost", e);
-                    return;
+                    try { Thread.sleep(500); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
