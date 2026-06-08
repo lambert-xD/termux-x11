@@ -89,9 +89,14 @@ int lorie_clipboard_read_pipe(int read_fd, char **out_text, size_t *out_len) {
     ssize_t n;
 
     while ((n = read(read_fd, chunk, sizeof(chunk))) > 0) {
-        if (len + (size_t)n > capacity) {
+        /* Reserve len + n + 1 bytes (the "+1" is for the NUL terminator
+         * appended below) so growth never needs a second realloc just to
+         * fit it — every consumer of *out_text may legitimately treat it
+         * as a C string (this project's own tests assert it via
+         * ASSERT_EQ_STR/strcmp; logging/debug paths may printf("%s") it). */
+        if (len + (size_t)n + 1 > capacity) {
             capacity = capacity ? capacity * 2 : 4096;
-            while (capacity < len + (size_t)n) capacity *= 2;
+            while (capacity < len + (size_t)n + 1) capacity *= 2;
             char *new_buf = realloc(buf, capacity);
             if (!new_buf) {
                 free(buf);
@@ -106,6 +111,25 @@ int lorie_clipboard_read_pipe(int read_fd, char **out_text, size_t *out_len) {
     if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
         free(buf);
         return -1;
+    }
+
+    /* NUL-terminate: out_text is a char** (string-shaped contract by name,
+     * type and by this file's own ASSERT_EQ_STR-based tests). Without this,
+     * buf[len] is uninitialized heap memory — any C-string consumer
+     * (strcmp/strlen/printf %s) reads past the valid region into garbage.
+     * Reproduced via test_clipboard_wayland_to_android: ASSERT_EQ_STR
+     * compared "wayland text" (valid) against "wayland text<garbage>"
+     * (heap bytes beyond `len`) and failed non-deterministically depending
+     * on heap layout. `len > 0` always has the +1 slot reserved above; the
+     * `len == 0` / no-data case still needs a fresh 1-byte allocation so
+     * *out_text is a valid empty C string rather than NULL-with-len-0
+     * (which would be inconsistent: ret == 0 "success" but text == NULL). */
+    if (len > 0) {
+        buf[len] = '\0';
+    } else if (!buf) {
+        buf = calloc(1, 1);
+        if (!buf)
+            return -1;
     }
 
     *out_text = buf;

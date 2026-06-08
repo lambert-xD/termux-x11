@@ -132,6 +132,25 @@ void surface_commit(struct wl_client *client,
     }
 
     if (s->pending_attached) {
+        /* Validate the attached resource is actually a wl_buffer (and, today,
+         * specifically an SHM buffer — the only buffer type this compositor
+         * implements) BEFORE storing it as s->buffer_resource. Storing an
+         * arbitrary client resource (e.g. a wl_surface passed by a buggy or
+         * malicious client) here is a use-after-free hazard: this function
+         * later calls wl_buffer_send_release(s->buffer_resource) on the next
+         * commit/destroy, which (a) sends a wl_buffer-shaped event to a
+         * resource that may not even be a wl_buffer (protocol corruption),
+         * and (b) dereferences the pointer even after the client legitimately
+         * destroyed that (wrong-typed) resource — a SIGSEGV reproduced via
+         * test_surface_commit_non_shm_buffer. wl_resource_instance_of (inside
+         * lorie_shm_buffer_from_resource) is the canonical libwayland check
+         * for both interface AND implementation, so NULL here reliably means
+         * "not a buffer this compositor recognizes" — treat it like detach. */
+        struct lorie_shm_buffer *shm = lorie_shm_buffer_from_resource(s->pending_buffer);
+        if (s->pending_buffer && !shm) {
+            s->pending_buffer = NULL;
+        }
+
         if (s->buffer_resource) {
             wl_buffer_send_release(s->buffer_resource);
             if (s->buffer) {
@@ -145,25 +164,22 @@ void surface_commit(struct wl_client *client,
         s->pending_buffer = NULL;
         s->pending_attached = 0;
 
-        if (s->buffer_resource) {
-            struct lorie_shm_buffer *shm = lorie_shm_buffer_from_resource(s->buffer_resource);
-            if (shm) {
-                int8_t lfmt = (shm->format == WL_SHM_FORMAT_ARGB8888)
-                    ? AHARDWAREBUFFER_FORMAT_B8G8R8A8_UNORM
-                    : AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM;
-                LorieBuffer *lb = LorieBuffer_allocate(shm->width, shm->height, lfmt, LORIEBUFFER_REGULAR);
-                if (lb) {
-                    const LorieBuffer_Desc *desc = LorieBuffer_description(lb);
-                    uint8_t *dst = (uint8_t*)desc->data;
-                    uint8_t *src = (uint8_t*)shm->data;
-                    int dst_stride = shm->width * 4;
-                    for (int row = 0; row < shm->height; row++) {
-                        memcpy(dst + row * dst_stride, src + row * shm->stride, shm->width * 4);
-                    }
-                    s->buffer = lb;
-                    s->width = shm->width;
-                    s->height = shm->height;
+        if (shm) {
+            int8_t lfmt = (shm->format == WL_SHM_FORMAT_ARGB8888)
+                ? AHARDWAREBUFFER_FORMAT_B8G8R8A8_UNORM
+                : AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM;
+            LorieBuffer *lb = LorieBuffer_allocate(shm->width, shm->height, lfmt, LORIEBUFFER_REGULAR);
+            if (lb) {
+                const LorieBuffer_Desc *desc = LorieBuffer_description(lb);
+                uint8_t *dst = (uint8_t*)desc->data;
+                uint8_t *src = (uint8_t*)shm->data;
+                int dst_stride = shm->width * 4;
+                for (int row = 0; row < shm->height; row++) {
+                    memcpy(dst + row * dst_stride, src + row * shm->stride, shm->width * 4);
                 }
+                s->buffer = lb;
+                s->width = shm->width;
+                s->height = shm->height;
             }
         }
     }

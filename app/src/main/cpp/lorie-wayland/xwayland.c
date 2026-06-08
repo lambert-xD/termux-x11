@@ -36,7 +36,26 @@ static char *get_tmpdir(void) {
         if (asprintf(&p, "%s/tmp", t) > 0 && access(p, W_OK) == 0) return p;
         free(p);
     }
-    return strdup("/data/local/tmp");
+    /* On-device (Termux/Android) safety net: TMPDIR/PREFIX are always set
+     * inside Termux, so this branch is effectively unreachable there — it
+     * only matters for unusual on-device shells where those vars are unset.
+     * `/data/local/tmp` is a well-known writable path for the shell user on
+     * stock Android. Probe writability rather than blindly returning it:
+     * it does not exist at all on a generic (non-Android) Linux host, and a
+     * blind strdup() here previously made lorie_xwayland_init() fail on
+     * EVERY display-number slot (open() => ENOENT for all 100 attempts),
+     * returning NULL — bug reproduced 100% by all 7 xwayland::* host tests
+     * (every one of them calls lorie_xwayland_init and asserts non-NULL). */
+    if (access("/data/local/tmp", W_OK) == 0)
+        return strdup("/data/local/tmp");
+    /* Final POSIX-standard fallback: `/tmp` exists and is writable on every
+     * sane Linux/Unix host (including this project's host test environment,
+     * which has neither TMPDIR/PREFIX set nor /data/local/tmp present) and
+     * is also present on many Android setups. Probed last so it never
+     * shadows the Termux-specific paths above on a real device. */
+    if (access("/tmp", W_OK) == 0)
+        return strdup("/tmp");
+    return NULL;
 }
 
 static int create_lockfile(int display, const char *tmpdir, char **out) {
