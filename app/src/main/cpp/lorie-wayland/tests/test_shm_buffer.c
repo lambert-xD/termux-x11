@@ -66,6 +66,31 @@ static int create_shm_fd(size_t size) {
     return fd;
 }
 
+/* libwayland's per-client object map (`wl_map_insert_at`) only allows
+ * insertion at slot `i` when the backing array already has `count >= i`
+ * entries (it grows by exactly one slot per call when `count == i`, and
+ * returns EINVAL when `count < i`). A freshly created client only has
+ * slots 0 (reserved) and 1 (wl_display) populated, so requesting an
+ * explicit non-sequential id like 99 or 100 directly via
+ * wl_resource_create() fails with NULL.
+ *
+ * The fixture-side fix (matching the proven pattern already used and
+ * passing in test_protocols.c's warm_up_client_ids): sequentially
+ * create-then-destroy throwaway callback resources for ids
+ * [2, target_id) so the map array grows to the required size.
+ * wl_resource_destroy() only clears the slot's data pointer
+ * (wl_map_remove) — it does NOT shrink the array — so the freed slots
+ * remain available for direct re-insertion at the same id afterwards. */
+static void warm_up_client_ids(struct wl_client *client, uint32_t target_id) {
+    uint32_t id;
+    for (id = 2; id < target_id; id++) {
+        struct wl_resource *r = wl_resource_create(client, &wl_callback_interface, 1, id);
+        if (!r)
+            continue;
+        wl_resource_destroy(r);
+    }
+}
+
 static struct test_ctx *setup_ctx(int pool_size) {
     struct test_ctx *ctx = calloc(1, sizeof(*ctx));
     ASSERT_NOT_NULL(ctx);
@@ -88,6 +113,10 @@ static struct test_ctx *setup_ctx(int pool_size) {
     ctx->client = wl_client_create(ctx->compositor->display, fds[0]);
     ASSERT_NOT_NULL(ctx->client);
     ctx->client_fd = fds[1]; /* keep open so connection stays alive */
+
+    /* Warm up the object-id map: several tests in this file create
+     * resources/surfaces with explicit non-sequential ids (99, 100). */
+    warm_up_client_ids(ctx->client, 200);
 
     /* Create a pool resource for the test client */
     ctx->pool_resource = wl_resource_create(ctx->client, &wl_shm_pool_interface, 1, 1);
@@ -407,12 +436,9 @@ static void test_shm_buffer_destroy_null_pool_safe(void) {
     struct lorie_shm_buffer buf = {0};
     buf.pool = NULL;
 
-    struct wl_resource *res = wl_resource_create(NULL, &wl_buffer_interface, 1, 0);
-    /* If res is NULL (no client), we can't fully test, but we can
-     * at least verify the destroy logic doesn't crash with NULL pool.
-     * We manually call the equivalent of buffer_destroy_resource. */
-
-    /* Simulate what buffer_destroy_resource does */
+    /* Simulate what buffer_destroy_resource does. (No wl_resource here:
+     * wl_resource_create(NULL, ...) is NOT null-client-safe — it dereferences
+     * client->objects and would SIGSEGV.) */
     if (buf.pool) {
         buf.pool->refcount--;
         if (buf.pool->refcount == 0 && buf.pool->pending_destroy) {
@@ -421,8 +447,6 @@ static void test_shm_buffer_destroy_null_pool_safe(void) {
     }
     /* No crash = pass */
     ASSERT_TRUE(1);
-
-    (void)res;
 }
 
 /* ------------------------------------------------------------------ */
@@ -541,6 +565,11 @@ static struct test_ctx *setup_ctx_prefilled(int pool_size, uint8_t fill) {
     ctx->client = wl_client_create(ctx->compositor->display, fds[0]);
     ASSERT_NOT_NULL(ctx->client);
     ctx->client_fd = fds[1];
+
+    /* See warm_up_client_ids() comment in setup_ctx(): explicit
+     * non-sequential resource ids (99, 100) require the client's
+     * object-id map array to be pre-grown to that size first. */
+    warm_up_client_ids(ctx->client, 200);
 
     ctx->pool_resource = wl_resource_create(ctx->client, &wl_shm_pool_interface, 1, 1);
     ASSERT_NOT_NULL(ctx->pool_resource);

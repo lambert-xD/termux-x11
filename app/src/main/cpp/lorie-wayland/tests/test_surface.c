@@ -92,6 +92,31 @@ static void test_region_add_subtract(void) {
     pixman_region32_fini(&region);
 }
 
+/* libwayland's per-client object map (`wl_map_insert_at`) only allows
+ * insertion at slot `i` when the backing array already has `count >= i`
+ * entries (it grows by exactly one slot per call when `count == i`, and
+ * fails with EINVAL when `count < i`). A freshly created client only has
+ * slots 0 (reserved) and 1 (wl_display) populated, so requesting an
+ * explicit non-sequential id like 100 directly via wl_resource_create()
+ * (transitively, via lorie_surface_create_internal) returns NULL.
+ *
+ * Fixture-side fix matching the proven pattern from test_protocols.c's
+ * warm_up_client_ids (21/21 passing there): sequentially create-then-
+ * destroy throwaway callback resources for ids [2, target_id) so the map
+ * array grows to the required size. wl_resource_destroy() only clears
+ * the slot's data pointer (wl_map_remove) — it does NOT shrink the
+ * array — so the freed slots remain available for direct re-insertion
+ * at the same id afterwards. */
+static void warm_up_client_ids(struct wl_client *client, uint32_t target_id) {
+    uint32_t id;
+    for (id = 2; id < target_id; id++) {
+        struct wl_resource *r = wl_resource_create(client, &wl_callback_interface, 1, id);
+        if (!r)
+            continue;
+        wl_resource_destroy(r);
+    }
+}
+
 static void test_frame_callback_not_fired_by_commit(void) {
     struct lorie_compositor *c = lorie_compositor_create();
     ASSERT_NOT_NULL(c);
@@ -104,6 +129,11 @@ static void test_frame_callback_not_fired_by_commit(void) {
 
     struct wl_client *client = wl_client_create(c->display, fds[0]);
     ASSERT_NOT_NULL(client);
+
+    /* Pre-grow the client's object-id map: this test creates resources
+     * with explicit non-sequential ids (100, 200) — see comment above
+     * warm_up_client_ids(). */
+    warm_up_client_ids(client, 300);
 
     struct lorie_surface *s = lorie_surface_create_internal(c, client, 100);
     ASSERT_NOT_NULL(s);

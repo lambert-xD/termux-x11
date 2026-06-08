@@ -23,13 +23,14 @@
  * runner's `jumping` read back as 0, `longjmp` never fired, and the test was
  * unconditionally printed `[ OK ]` — a harness that could never report FAIL.
  * See engram bugfix #163. */
-struct lorie_test_runner _lorie_runner = {0, 0, 0, NULL, NULL, {{0}}, 0};
+struct lorie_test_runner _lorie_runner = {0, 0, 0, 0, NULL, NULL, {{0}}, 0};
 
 int lorie_run_suite(struct lorie_test_suite* suite) {
     _lorie_runner.current_suite = suite->name;
     LOGI("\n[==========] Suite: %s (%d tests)", suite->name, suite->case_count);
 
     int suite_failed = 0;
+    int suite_skipped = 0;
     for (int i = 0; i < suite->case_count; i++) {
         struct lorie_test_case* tc = &suite->cases[i];
         _lorie_runner.current_test = tc->name;
@@ -38,13 +39,22 @@ int lorie_run_suite(struct lorie_test_suite* suite) {
         LOGI("[ RUN      ] %s::%s", suite->name, tc->name);
 
         _lorie_runner.jumping = 1;
-        if (setjmp(_lorie_runner.jump) == 0) {
+        int outcome = setjmp(_lorie_runner.jump);
+        if (outcome == 0) {
             if (suite->setup) suite->setup();
             tc->fn();
             if (suite->teardown) suite->teardown();
             LOGI("[       OK ] %s::%s", suite->name, tc->name);
+        } else if (outcome == 2) {
+            /* LORIE_SKIP / LORIE_SKIP_UNLESS_DEVICE longjmp'd out: the test
+             * is environment-gated (no GPU/EGL/Surface on host), NOT failing.
+             * Reported and counted distinctly — never added to suite_failed,
+             * never affects the process exit code (see lorie_test_main). */
+            if (suite->teardown) suite->teardown();
+            suite_skipped++;
+            LOGI("[ SKIPPED  ] %s::%s", suite->name, tc->name);
         } else {
-            /* Assertion failed and longjmp'd back */
+            /* Assertion failed and longjmp'd back (outcome == 1) */
             if (suite->teardown) suite->teardown();
             suite_failed++;
             LOGI("[  FAILED  ] %s::%s", suite->name, tc->name);
@@ -52,8 +62,14 @@ int lorie_run_suite(struct lorie_test_suite* suite) {
         _lorie_runner.jumping = 0;
     }
 
-    LOGI("[==========] Suite: %s done (%d/%d passed)",
-         suite->name, suite->case_count - suite_failed, suite->case_count);
+    if (suite_skipped > 0) {
+        LOGI("[==========] Suite: %s done (%d/%d passed, %d skipped)",
+             suite->name, suite->case_count - suite_failed - suite_skipped,
+             suite->case_count, suite_skipped);
+    } else {
+        LOGI("[==========] Suite: %s done (%d/%d passed)",
+             suite->name, suite->case_count - suite_failed, suite->case_count);
+    }
     return suite_failed;
 }
 
@@ -70,10 +86,22 @@ int lorie_test_main(int argc, char** argv,
     }
 
     LOGI("\n========================================");
-    LOGI("  Results: %d passed, %d failed, %d total assertions",
-         _lorie_runner.passed, _lorie_runner.failed, _lorie_runner.passed + _lorie_runner.failed);
+    if (_lorie_runner.skipped > 0) {
+        LOGI("  Results: %d passed, %d failed, %d skipped, %d total assertions",
+             _lorie_runner.passed, _lorie_runner.failed, _lorie_runner.skipped,
+             _lorie_runner.passed + _lorie_runner.failed);
+    } else {
+        LOGI("  Results: %d passed, %d failed, %d total assertions",
+             _lorie_runner.passed, _lorie_runner.failed, _lorie_runner.passed + _lorie_runner.failed);
+    }
     LOGI("========================================");
 
+    /* total_failed (sum of suite_failed) is what determines the exit code —
+     * skips never contribute to it, by construction (suite_skipped is a
+     * separate counter never added to suite_failed / total_failed). A clean
+     * host run with N real failures fixed and M genuinely-env-gated
+     * assertions skipped now honestly ends "exit 0" with skips reported,
+     * never silently green AND never falsely red over an environment fact. */
     return total_failed > 0 ? 1 : 0;
 }
 

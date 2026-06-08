@@ -8,6 +8,7 @@
  */
 
 #include "lorie_test.h"
+#include "lorie_test_fixtures.h"
 #include "../compositor.h"
 #include "../renderer.h"
 #include <wayland-server-protocol.h>
@@ -15,9 +16,9 @@
 static void test_transform_matrix_computed(void) {
     struct lorie_renderer *r = lorie_renderer_create();
     ASSERT_NOT_NULL(r);
-    static char dummy_surface[256];
-    struct lorie_surface *s = (struct lorie_surface *)dummy_surface;
-    memset(s, 0, sizeof(*s));
+    static struct lorie_surface dummy_surface;
+    struct lorie_surface *s = &dummy_surface;
+    lorie_test_init_surface(s);
     s->buffer_transform = WL_OUTPUT_TRANSFORM_90;
     s->buffer_scale = 2;
     s->width = 100;

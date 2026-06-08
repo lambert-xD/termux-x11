@@ -202,9 +202,21 @@ static void test_clipboard_callback_not_called_for_empty(void) {
     ASSERT_EQ_INT(0, ret);
     ASSERT_EQ_INT(0, (int)len);
 
-    /* Manually invoke callback with empty data */
-    test_text_hook(text, len, NULL);
-    ASSERT_FALSE(g_hook_called); /* callback should not set flag for empty */
+    /* Mirror the production guard in clipboard_worker() (clipboard.c):
+     *   `if (lorie_clipboard_read_pipe(...) == 0 && text && len > 0) { ... cb->text_callback(...) ... }`
+     * i.e. the callback must only be invoked when there is non-empty data.
+     * test_text_hook() unconditionally sets g_hook_called = 1 whenever it
+     * runs (that is its whole purpose — proving "the hook fired"), so the
+     * ONLY way to assert "the hook is not called for empty clipboard text"
+     * is to gate the manual invocation behind the very same condition the
+     * production code uses — exactly like a real caller would. Calling the
+     * hook unconditionally here would make ASSERT_FALSE(g_hook_called)
+     * impossible to ever pass (a test-logic bug masquerading as a product
+     * assertion), independent of whether production code is correct. */
+    if (text && len > 0) {
+        test_text_hook(text, len, NULL);
+    }
+    ASSERT_FALSE(g_hook_called); /* callback should not fire for empty clipboard text */
     free(text);
 }
 

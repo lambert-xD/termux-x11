@@ -10,6 +10,7 @@
 
 #include "lorie_test.h"
 #include "../renderer.h"
+#include "../compositor.h"
 #include <pixman.h>
 
 static void test_damage_accumulates(void) {
@@ -54,8 +55,13 @@ static void test_damage_bbox_correct(void) {
 static void test_damage_cleared_after_commit(void) {
     struct lorie_renderer *r = lorie_renderer_create();
     ASSERT_NOT_NULL(r);
-    static char dummy_surface[256];
-    struct lorie_surface *s = (struct lorie_surface *)dummy_surface;
+    /* A real (zero-initialized) surface: lorie_renderer_commit walks
+     * s->frame_callbacks, which must be a valid empty wl_list. The raw
+     * char[256] cast used by the non-commit tests leaves the list head
+     * NULL, so the commit path would dereference a bad pointer (SIGSEGV). */
+    static struct lorie_surface dummy_surface;
+    struct lorie_surface *s = &dummy_surface;
+    wl_list_init(&s->frame_callbacks);
     lorie_renderer_add_surface(r, s);
 
     lorie_renderer_damage_surface(r, s, 10, 20, 100, 50);
@@ -76,8 +82,10 @@ static void test_damage_cleared_after_commit(void) {
 static void test_damage_empty_region_no_crash(void) {
     struct lorie_renderer *r = lorie_renderer_create();
     ASSERT_NOT_NULL(r);
-    static char dummy_surface[256];
-    struct lorie_surface *s = (struct lorie_surface *)dummy_surface;
+    /* Real surface: commit walks s->frame_callbacks (must be a valid list). */
+    static struct lorie_surface dummy_surface;
+    struct lorie_surface *s = &dummy_surface;
+    wl_list_init(&s->frame_callbacks);
     lorie_renderer_add_surface(r, s);
 
     /* No damage added - commit should not crash */
@@ -127,8 +135,10 @@ static void test_damage_negative_size_ignored(void) {
 static void test_damage_empty_skips_draw(void) {
     struct lorie_renderer *r = lorie_renderer_create();
     ASSERT_NOT_NULL(r);
-    static char dummy_surface[256];
-    struct lorie_surface *s = (struct lorie_surface *)dummy_surface;
+    /* Real surface: commit walks s->frame_callbacks (must be a valid list). */
+    static struct lorie_surface dummy_surface;
+    struct lorie_surface *s = &dummy_surface;
+    wl_list_init(&s->frame_callbacks);
     lorie_renderer_add_surface(r, s);
 
     /* No damage added — surface should not be drawn */
